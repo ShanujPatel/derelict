@@ -2,6 +2,7 @@ import Phaser from 'phaser';
 import { computeGameSize } from './core/viewport';
 import { BootScene } from './scenes/BootScene';
 import { GameScene } from './scenes/GameScene';
+import { HubScene } from './scenes/HubScene';
 
 const initial = computeGameSize(window.innerWidth, window.innerHeight);
 
@@ -16,7 +17,7 @@ const game = new Phaser.Game({
   // FIT + a game size matching the window's shape fills the screen in any orientation.
   scale: { mode: Phaser.Scale.FIT, autoCenter: Phaser.Scale.CENTER_BOTH },
   input: { activePointers: 3 },
-  scene: [BootScene, GameScene],
+  scene: [BootScene, HubScene, GameScene],
 });
 
 let pending = 0;

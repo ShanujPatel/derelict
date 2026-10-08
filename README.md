@@ -23,6 +23,18 @@ A real-time, top-down sci-fi roguelike that runs in the browser. Board abandoned
 
 Find salvage crates and O₂ canisters, avoid or destroy the patrol drones, and reach the green extraction pad. Salvage only counts if you extract. The green arrow round your suit points to the exit.
 
+**Between runs** you're back on your own ship. Spend banked salvage on:
+
+- **Crew:** unlock the armoured Robot, which runs on battery instead of oxygen.
+- **Systems:** hull plating, life support and servo boot upgrades.
+- **Armoury:** the Railgun, which pierces a whole line of drones.
+- **Perks:** Scavenger, Cold cutter, Scrapper or Second wind, one per run.
+- **Cosmetics:** suit, visor, chassis and optics colours.
+
+Progress saves in your browser. Use **Log → Copy save code** to move it to another device.
+
+<img src="docs/screenshot-hub.png" alt="Hub screen" width="480">
+
 **Seeds:** every ship comes from a seed shown in the top-right corner. Share a ship with `?seed=YOURSEED`, or play today's shared ship with `?daily`.
 
 ## Running locally
@@ -50,9 +62,11 @@ npm run build      # production build in dist/
 ```
 src/
   core/      Pure game logic: RNG, seeds, deck generator, tile display rules,
-             pathing, oxygen, weapons, virtual-stick maths, screen sizing.
+             pathing, oxygen, weapons, progression (shop, saves, export codes),
+             virtual-stick maths, screen sizing.
              No Phaser imports, so it's fully unit-tested.
-  scenes/    Phaser scenes: Boot (builds textures) and Game.
+  scenes/    Phaser scenes: Boot (builds textures), Hub and Game.
+  hub/       Between-runs screens as an HTML/CSS overlay.
   ui/        Touch controls (twin virtual sticks).
   art/       Original pixel art defined in code: no binary assets.
 tests/       Vitest unit tests for everything in core/.
@@ -67,9 +81,9 @@ See the full [game design document](docs/GDD.md).
 
 - [x] **v0.1** Salvager, freighter decks, drones, two guns, cutting torch, oxygen, seeded runs, CI/CD
 - [x] **v0.1.1** New pixel art, lighting, touch controls, portrait and landscape mobile support
-- [ ] **v0.2** Robot character, customisation, hub with permanent unlocks
+- [x] **v0.2** Robot character, customisation, hub with permanent unlocks, railgun, perks
 - [ ] **v0.3** Research vessels, alien enemies, codex chapter 1, hacking tool
-- [ ] **v0.4** Daily leaderboard, rival salvagers, grav tool, railgun
+- [ ] **v0.4** Daily leaderboard, rival salvagers, grav tool
 - [ ] **Later** Bosses, more codex chapters, more ship types
 
 ## Licence

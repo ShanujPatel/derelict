@@ -1,5 +1,6 @@
 import Phaser from 'phaser';
 import { TILE_SIZE } from '../art/sprites';
+import { ensureCharacterTexture } from '../art/textures';
 import { generateDeck, type Deck } from '../core/deckGenerator';
 import {
   SOLID_DISPLAY_TILES,
@@ -16,10 +17,11 @@ import {
   type OxygenState,
 } from '../core/oxygen';
 import { hasLineOfSight } from '../core/pathing';
-import { hashString, randomSeed, type ResolvedSeed } from '../core/seed';
+import { applyRunResult, computeRunStats, type RunStats } from '../core/progression';
+import { hashString, type ResolvedSeed } from '../core/seed';
 import { Tile, type Point } from '../core/types';
-import { WEAPONS, pelletAngles, type WeaponDef } from '../core/weapons';
-import { loadBestSalvage, saveBestSalvage } from '../storage';
+import { pelletAngles, type WeaponDef } from '../core/weapons';
+import { loadSave, storeSave } from '../storage';
 import { TouchControls } from '../ui/TouchControls';
 
 type Sprite = Phaser.Physics.Arcade.Sprite;
@@ -29,11 +31,11 @@ type Keys = Record<
 >;
 
 const PLAYER_SPEED = 110;
-const MAX_HP = 100;
 const DRONE_SPEED = 72;
 const DRONE_SIGHT = 160;
 const DRONE_HP = 3;
-const TORCH_OXYGEN_COST = 4;
+const TORCH_COST = 4;
+const DRONE_DROP_CHANCE = 0.3;
 const SUFFOCATION_DPS = 6;
 const DARKNESS = 0.6;
 
@@ -74,7 +76,11 @@ export class GameScene extends Phaser.Scene {
   private endScreen: Phaser.GameObjects.GameObject[] = [];
 
   // Run state — reset in init() because Phaser reuses the scene instance on restart.
-  private hp = MAX_HP;
+  private stats!: RunStats;
+  private walkAnim = '';
+  private hp = 100;
+  private dronesDestroyed = 0;
+  private secondWindUsed = false;
   private oxygen: OxygenState = createOxygen();
   private salvage = 0;
   private weapons: WeaponDef[] = [];
@@ -91,10 +97,13 @@ export class GameScene extends Phaser.Scene {
   init(data: ResolvedSeed) {
     this.run = data;
     this.seedHash = hashString(data.seed);
-    this.hp = MAX_HP;
-    this.oxygen = createOxygen();
+    this.stats = computeRunStats(loadSave());
+    this.hp = this.stats.maxHp;
+    this.oxygen = createOxygen(this.stats.capacity, this.stats.drainPerSecond);
     this.salvage = 0;
-    this.weapons = [WEAPONS.blaster, WEAPONS.scattergun];
+    this.dronesDestroyed = 0;
+    this.secondWindUsed = false;
+    this.weapons = [...this.stats.guns];
     this.weaponIndex = 0;
     this.lastShotAt = 0;
     this.lastTorchAt = 0;
@@ -173,15 +182,15 @@ export class GameScene extends Phaser.Scene {
         const shadow = this.add.image(x, y + 9, 'shadow').setDepth(4);
         d.setData({ hp: DRONE_HP, alertUntil: 0, nextWander: 0, shadow });
       } else {
-        const item = this.pickups.create(x, y, s.kind) as Sprite;
-        item.setDepth(5).setData({ kind: s.kind, value: s.value });
-        this.tweens.add({ targets: item, y: y - 2, yoyo: true, repeat: -1, duration: 600 });
+        this.addPickup(x, y, s.kind, s.value);
       }
     }
 
     const start = toWorld(this.deck.start);
     this.playerShadow = this.add.image(start.x, start.y + 7, 'shadow').setDepth(4);
-    this.player = this.physics.add.sprite(start.x, start.y, 'player', 0);
+    const look = ensureCharacterTexture(this, this.stats.character.id, this.stats.colours);
+    this.walkAnim = look.walk;
+    this.player = this.physics.add.sprite(start.x, start.y, look.texture, 0);
     this.player.setDepth(11).setCircle(5, 3, 3).setCollideWorldBounds(true);
     this.cameras.main.startFollow(this.player, true, 0.15, 0.15);
 
@@ -205,7 +214,8 @@ export class GameScene extends Phaser.Scene {
   private setupInput() {
     const kb = this.input.keyboard;
     if (!kb) throw new Error('Keyboard input unavailable');
-    this.keys = kb.addKeys('W,A,S,D,UP,LEFT,DOWN,RIGHT,Q,F,R,ENTER,ONE,TWO') as Keys;
+    // No key capture, so typing still works in the hub after a run.
+    this.keys = kb.addKeys('W,A,S,D,UP,LEFT,DOWN,RIGHT,Q,F,R,ENTER,ONE,TWO', false) as Keys;
     this.input.mouse?.disableContextMenu();
     this.input.on('wheel', () => this.switchWeapon());
     this.touch = new TouchControls(this);
@@ -236,7 +246,7 @@ export class GameScene extends Phaser.Scene {
     const fixed = (t: Phaser.GameObjects.Text) => t.setScrollFactor(0).setDepth(101);
     this.hud = this.add.graphics().setScrollFactor(0).setDepth(100);
     this.hpLabel = fixed(this.add.text(0, 0, 'HP', FONT));
-    this.o2Label = fixed(this.add.text(0, 0, 'O₂', FONT));
+    this.o2Label = fixed(this.add.text(0, 0, this.isRobot ? 'PWR' : 'O₂', FONT));
     this.salvageText = fixed(this.add.text(0, 0, '', FONT).setOrigin(1, 0));
     this.weaponText = fixed(this.add.text(0, 0, '', FONT));
     const label = this.run.mode === 'daily' ? this.run.seed.toUpperCase() : `SEED ${this.run.seed}`;
@@ -288,7 +298,7 @@ export class GameScene extends Phaser.Scene {
     this.oxygen = tickOxygen(this.oxygen, seconds);
     if (isOxygenEmpty(this.oxygen)) {
       this.hp -= SUFFOCATION_DPS * seconds;
-      if (this.hp <= 0) return this.endRun(false, 'Oxygen depleted');
+      if (this.hp <= 0) return this.endRun(false, this.isRobot ? 'Battery flat' : 'Oxygen depleted');
     }
 
     this.drawLighting();
@@ -307,9 +317,10 @@ export class GameScene extends Phaser.Scene {
       ix = t.move.x;
       iy = t.move.y;
     }
-    this.player.setVelocity(ix * PLAYER_SPEED, iy * PLAYER_SPEED);
+    const speed = PLAYER_SPEED * this.stats.speedMultiplier;
+    this.player.setVelocity(ix * speed, iy * speed);
     const moving = Math.abs(ix) + Math.abs(iy) > 0.05;
-    if (moving) this.player.anims.play('player-walk', true);
+    if (moving) this.player.anims.play(this.walkAnim, true);
     else this.player.anims.stop();
     this.playerShadow.setPosition(this.player.x, this.player.y + 7);
 
@@ -379,7 +390,8 @@ export class GameScene extends Phaser.Scene {
       const b = this.bullets.create(x, y, 'bullet') as Sprite;
       b.setDepth(12).setCircle(2).setRotation(angle);
       b.setVelocity(Math.cos(angle) * weapon.bulletSpeed, Math.sin(angle) * weapon.bulletSpeed);
-      b.setData('damage', weapon.damage);
+      b.setData({ damage: weapon.damage, pierce: weapon.pierce, hit: new Set<Sprite>() });
+      if (weapon.pierce) b.setScale(1.5).setTint(0x9fe8ff);
       this.time.delayedCall(weapon.lifetimeMs, () => b.destroy());
     }
     this.muzzle
@@ -405,7 +417,7 @@ export class GameScene extends Phaser.Scene {
       const ny = t.y + Math.round(Math.sin(aim));
       if (this.grid[ny]?.[nx] === Tile.WeakWall) this.cutTile(nx, ny);
 
-      this.oxygen = spendOxygen(this.oxygen, TORCH_OXYGEN_COST);
+      this.oxygen = spendOxygen(this.oxygen, this.hasPerk('cold-cutter') ? 1 : TORCH_COST);
       const w = toWorld(t);
       this.sparks.explode(24, w.x, w.y);
       this.cameras.main.shake(120, 0.006);
@@ -429,9 +441,12 @@ export class GameScene extends Phaser.Scene {
 
   private hitDrone(bullet: Sprite, drone: Sprite) {
     if (!bullet.active || !drone.active) return;
+    const already = bullet.getData('hit') as Set<Sprite>;
+    if (already.has(drone)) return;
+    already.add(drone);
     const hp = drone.getData('hp') - bullet.getData('damage');
     const angle = Math.atan2(bullet.body!.velocity.y, bullet.body!.velocity.x);
-    bullet.destroy();
+    if (!bullet.getData('pierce')) bullet.destroy();
     drone.setData({ hp, alertUntil: this.time.now + 4000 });
     drone.setTintFill(0xffffff);
     this.time.delayedCall(60, () => drone.active && drone.clearTint());
@@ -443,6 +458,9 @@ export class GameScene extends Phaser.Scene {
       this.tweens.add({ targets: ring, scale: 4, alpha: 0, duration: 260, onComplete: () => ring.destroy() });
       this.cameras.main.shake(80, 0.006);
       (drone.getData('shadow') as Phaser.GameObjects.Image).destroy();
+      this.dronesDestroyed += 1;
+      if (this.hasPerk('scrapper')) this.addPickup(drone.x, drone.y, 'salvage', Phaser.Math.Between(5, 10));
+      else if (Math.random() < DRONE_DROP_CHANCE) this.addPickup(drone.x, drone.y, 'salvage', Phaser.Math.Between(3, 8));
       drone.destroy();
     }
   }
@@ -450,7 +468,13 @@ export class GameScene extends Phaser.Scene {
   private hurtPlayer(amount: number, source: Sprite) {
     if (this.time.now < this.invulnerableUntil || this.ended) return;
     this.invulnerableUntil = this.time.now + 800;
-    this.hp -= amount;
+    this.hp -= amount * (1 - this.stats.armour);
+    if (this.hp <= 0 && this.hasPerk('second-wind') && !this.secondWindUsed) {
+      this.secondWindUsed = true;
+      this.hp = 1;
+      this.invulnerableUntil = this.time.now + 2000;
+      this.floatText(this.player.x, this.player.y - 12, 'SECOND WIND', '#3dff9a');
+    }
     this.cameras.main.shake(140, 0.012);
     this.cameras.main.flash(80, 120, 0, 0);
     this.player.setTintFill(0xff5566);
@@ -459,7 +483,7 @@ export class GameScene extends Phaser.Scene {
 
     const a = Phaser.Math.Angle.Between(source.x, source.y, this.player.x, this.player.y);
     source.setVelocity(-Math.cos(a) * 120, -Math.sin(a) * 120);
-    if (this.hp <= 0) this.endRun(false, 'Hull breach — salvager lost');
+    if (this.hp <= 0) this.endRun(false, this.isRobot ? 'Chassis destroyed' : 'Hull breach — salvager lost');
   }
 
   private collect(item: Sprite) {
@@ -468,10 +492,11 @@ export class GameScene extends Phaser.Scene {
     const value = item.getData('value') as number;
     if (kind === 'oxygen') {
       this.oxygen = refillOxygen(this.oxygen, value);
-      this.floatText(item.x, item.y, `+${value} O₂`, '#6fd6ff');
+      this.floatText(item.x, item.y, `+${value} ${this.isRobot ? 'PWR' : 'O₂'}`, this.isRobot ? '#ffd166' : '#6fd6ff');
     } else {
-      this.salvage += value;
-      this.floatText(item.x, item.y, `+${value}`, '#e8b04a');
+      const amount = this.hasPerk('scavenger') ? Math.round(value * 1.25) : value;
+      this.salvage += amount;
+      this.floatText(item.x, item.y, `+${amount}`, '#e8b04a');
     }
     item.destroy();
   }
@@ -483,10 +508,15 @@ export class GameScene extends Phaser.Scene {
     this.player.anims.stop();
     this.drawHud();
 
-    const best = loadBestSalvage();
-    const banked = extracted ? this.salvage : 0;
-    const newBest = banked > best;
-    if (newBest) saveBestSalvage(banked);
+    const before = loadSave();
+    const after = applyRunResult(before, {
+      extracted,
+      salvage: this.salvage,
+      dronesDestroyed: this.dronesDestroyed,
+    });
+    storeSave(after);
+    const banked = after.credits - before.credits;
+    const newBest = extracted && banked > before.stats.bestHaul;
 
     const { width: w, height: h } = this.scale;
     const ui = <T extends Phaser.GameObjects.Text | Phaser.GameObjects.Rectangle>(o: T) => {
@@ -498,7 +528,7 @@ export class GameScene extends Phaser.Scene {
     ui(this.add.rectangle(w / 2, h / 2, w, h, 0x05070c, 0.8));
     ui(
       this.add
-        .text(w / 2, h / 2 - 48, extracted ? 'EXTRACTED' : 'SIGNAL LOST', {
+        .text(w / 2, h / 2 - 52, extracted ? 'EXTRACTED' : 'SIGNAL LOST', {
           ...FONT,
           fontSize: '20px',
           color: extracted ? '#3dff9a' : '#ff3b4e',
@@ -506,19 +536,19 @@ export class GameScene extends Phaser.Scene {
         .setOrigin(0.5),
     );
     const lines = extracted
-      ? [`Salvage banked: ${banked}`, newBest ? 'New best!' : `Best: ${Math.max(best, banked)}`]
+      ? [`Salvage banked: ${banked}${newBest ? '  (new best!)' : ''}`]
       : [reason, `Salvage lost: ${this.salvage}`];
+    lines.push(`Drones destroyed: ${this.dronesDestroyed}`, `Ship's hold: ${after.credits}`);
     ui(this.add.text(w / 2, h / 2 - 10, lines.join('\n'), { ...FONT, fontSize: '11px', align: 'center' }).setOrigin(0.5));
 
     const retry = () => this.scene.restart(this.run);
-    const fresh = () => {
-      const seed = randomSeed();
+    const hub = () => {
       try {
-        window.history.replaceState(null, '', `?seed=${seed}`);
+        window.history.replaceState(null, '', window.location.pathname);
       } catch {
         /* ignore */
       }
-      this.scene.restart({ seed, mode: 'random' } satisfies ResolvedSeed);
+      this.scene.start('Hub');
     };
 
     const button = (y: number, label: string, onTap: () => void) =>
@@ -543,10 +573,10 @@ export class GameScene extends Phaser.Scene {
 
     // Short delay so a held trigger doesn't skip the results screen.
     this.time.delayedCall(400, () => {
-      button(h / 2 + 26, this.touch.enabled ? 'RETRY THIS SHIP' : 'RETRY THIS SHIP  [ENTER]', retry);
-      button(h / 2 + 52, this.touch.enabled ? 'NEW DERELICT' : 'NEW DERELICT  [R]', fresh);
-      this.input.keyboard?.once('keydown-ENTER', retry);
-      this.input.keyboard?.once('keydown-R', fresh);
+      button(h / 2 + 36, this.touch.enabled ? 'RETURN TO SHIP' : 'RETURN TO SHIP  [ENTER]', hub);
+      button(h / 2 + 62, this.touch.enabled ? 'RETRY THIS DERELICT' : 'RETRY THIS DERELICT  [R]', retry);
+      this.input.keyboard?.once('keydown-ENTER', hub);
+      this.input.keyboard?.once('keydown-R', retry);
     });
   }
 
@@ -573,9 +603,9 @@ export class GameScene extends Phaser.Scene {
       g.fillStyle(0x0d1220, 0.9).fillRect(26, y, 82, 7);
       g.fillStyle(colour).fillRect(27, y + 1, Math.max(0, (value / max) * 80), 5);
     };
-    bar(8, this.hp, MAX_HP, 0xff3b4e);
+    bar(8, this.hp, this.stats.maxHp, 0xff3b4e);
     const low = this.oxygen.current < 25 && Math.floor(this.time.now / 250) % 2 === 0;
-    bar(20, this.oxygen.current, this.oxygen.max, low ? 0xffffff : 0x3fa7ff);
+    bar(20, this.oxygen.current, this.oxygen.max, low ? 0xffffff : this.isRobot ? 0xffc23d : 0x3fa7ff);
 
     this.salvageText.setText(`SALVAGE ${this.salvage}`);
     this.weaponText.setText(
@@ -608,6 +638,21 @@ export class GameScene extends Phaser.Scene {
       .setOrigin(0.5)
       .setDepth(95);
     this.tweens.add({ targets: t, y: y - 14, alpha: 0, duration: 700, onComplete: () => t.destroy() });
+  }
+
+  private get isRobot(): boolean {
+    return this.stats.character.resource === 'battery';
+  }
+
+  private hasPerk(id: string): boolean {
+    return this.stats.perk?.id === id;
+  }
+
+  private addPickup(x: number, y: number, kind: 'oxygen' | 'salvage', value: number) {
+    const texture = kind === 'oxygen' && this.isRobot ? 'battery' : kind;
+    const item = this.pickups.create(x, y, texture) as Sprite;
+    item.setDepth(5).setData({ kind, value });
+    this.tweens.add({ targets: item, y: y - 2, yoyo: true, repeat: -1, duration: 600 });
   }
 
   private tileAt(x: number, y: number): Point {

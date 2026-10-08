@@ -5,36 +5,36 @@ import {
   FLASH,
   LAMP,
   OXYGEN,
-  PLAYER_FRAMES,
+  POWER_CELL,
   SALVAGE,
   SPARK,
   TILE_SIZE,
   paintLight,
-  paintSprite,
   paintTileset,
   type PixelSprite,
 } from '../art/sprites';
+import { makeSpriteSheet } from '../art/textures';
 import { DISPLAY_TILE_COUNT } from '../core/display';
 import { resolveSeed } from '../core/seed';
 
-/** Builds all textures and animations in code, then starts the first run. */
+/** Builds shared textures and animations in code, then opens the hub (or a shared ship). */
 export class BootScene extends Phaser.Scene {
   constructor() {
     super('Boot');
   }
 
   create() {
-    this.spriteSheet('player', PLAYER_FRAMES);
-    this.spriteSheet('drone', DRONE_FRAMES);
+    makeSpriteSheet(this, 'drone', DRONE_FRAMES);
     const singles: Record<string, PixelSprite> = {
       bullet: BULLET,
       flash: FLASH,
       oxygen: OXYGEN,
+      battery: POWER_CELL,
       salvage: SALVAGE,
       lamp: LAMP,
       spark: SPARK,
     };
-    for (const [key, sprite] of Object.entries(singles)) this.spriteSheet(key, [sprite]);
+    for (const [key, sprite] of Object.entries(singles)) makeSpriteSheet(this, key, [sprite]);
 
     this.canvas('tiles', TILE_SIZE * DISPLAY_TILE_COUNT, TILE_SIZE, paintTileset);
     this.canvas('light', 240, 240, (ctx) => paintLight(ctx, 120));
@@ -44,6 +44,10 @@ export class BootScene extends Phaser.Scene {
       ctx.beginPath();
       ctx.ellipse(6, 2.5, 6, 2.5, 0, 0, Math.PI * 2);
       ctx.fill();
+    });
+    this.canvas('star', 1, 1, (ctx) => {
+      ctx.fillStyle = '#ffffff';
+      ctx.fillRect(0, 0, 1, 1);
     });
 
     // Extraction pad: ringed landing platform.
@@ -56,32 +60,17 @@ export class BootScene extends Phaser.Scene {
     g.destroy();
 
     this.anims.create({
-      key: 'player-walk',
-      frames: [0, 1, 2, 3].map((frame) => ({ key: 'player', frame })),
-      frameRate: 9,
-      repeat: -1,
-    });
-    this.anims.create({
       key: 'drone-idle',
       frames: [0, 1].map((frame) => ({ key: 'drone', frame })),
       frameRate: 3,
       repeat: -1,
     });
 
-    this.scene.start('Game', resolveSeed(window.location.search));
-  }
-
-  /** Paints frames side by side into one canvas texture with numbered frames. */
-  private spriteSheet(key: string, frames: PixelSprite[]) {
-    const w = frames[0].rows[0].length;
-    const h = frames[0].rows.length;
-    const tex = this.textures.createCanvas(key, w * frames.length, h);
-    if (!tex) return;
-    frames.forEach((sprite, i) => {
-      paintSprite(tex.getContext(), sprite, i * w, 0);
-      tex.add(i, 0, i * w, 0, w, h);
-    });
-    tex.refresh();
+    // A shared link (?seed= or ?daily) boards that ship straight away; otherwise start in the hub.
+    const search = window.location.search;
+    const params = new URLSearchParams(search);
+    if (params.has('seed') || params.has('daily')) this.scene.start('Game', resolveSeed(search));
+    else this.scene.start('Hub');
   }
 
   private canvas(key: string, w: number, h: number, paint: (ctx: CanvasRenderingContext2D) => void) {

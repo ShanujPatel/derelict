@@ -45,7 +45,7 @@ Players choose and customise their character before each run.
 | Weakness | Toxic gas, vacuum breaches | EMP damage; can't use medkits (uses repair kits) |
 
 **Customisation**
-- *Cosmetic:* palette swaps, helmet / head-unit parts, suit / chassis parts, trail effects.
+- *Cosmetic:* suit/visor colours (salvager) and chassis/optics colours (robot), bought with salvage. Later: helmet / head-unit parts, trail effects.
 - *Loadout:* starting gun, tool and one perk, chosen from what you've unlocked.
 
 ## 4. Setting and mystery
@@ -156,9 +156,9 @@ Each version is a tagged GitHub release with notes.
 |---|---|
 | **v0.1** ✅ | Salvager only; corporate freighter; patrol drones; blaster + scattergun; cutting torch; seeded deck generation; oxygen; extraction; tests; auto-deploy |
 | **v0.1.1** ✅ | Original pixel art pass, lighting, touch controls, portrait/landscape mobile |
-| **v0.2** | Robot character; customisation; Hub with permanent unlocks; save data |
+| **v0.2** ✅ | Robot character; customisation; Hub with permanent unlocks; save data |
 | **v0.3** | Research vessel + alien enemies; codex chapter 1; hacking tool |
-| **v0.4** | Daily Derelict; online leaderboard; rival salvager events; grav tool; railgun |
+| **v0.4** | Daily Derelict; online leaderboard; rival salvager events; grav tool |
 | **Later** | Bosses; codex chapters 2–3; more ship types; gamepad polish; accessibility options |
 
 ## 13. Open questions

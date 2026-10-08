@@ -51,13 +51,85 @@ type Pixel = [number, number];
 const STRIDE_A: Pixel[] = [[12, 3], [13, 3], [13, 4], [2, 11], [3, 12], [2, 12]];
 const STRIDE_B: Pixel[] = [[2, 3], [3, 3], [2, 4], [12, 12], [13, 12], [13, 11]];
 
-/** Frames: 0 idle, 1 stride A, 2 idle, 3 stride B. */
-export const PLAYER_FRAMES: PixelSprite[] = [[], STRIDE_A, [], STRIDE_B].map((boots) => ({
-  palette: { ...PLAYER_PALETTE, f: BOOT },
-  rows: PLAYER_BODY.map((row, y) =>
-    [...row].map((ch, x) => (ch === '.' && boots.some(([bx, by]) => bx === x && by === y) ? 'f' : ch)).join(''),
-  ),
-}));
+/** Salvager frames: 0 idle, 1 stride A, 2 idle, 3 stride B. */
+function salvagerFrames(colours: Record<string, string>): PixelSprite[] {
+  return [[], STRIDE_A, [], STRIDE_B].map((boots) => ({
+    palette: { ...PLAYER_PALETTE, f: BOOT, ...colours },
+    rows: PLAYER_BODY.map((row, y) =>
+      [...row]
+        .map((ch, x) => (ch === '.' && boots.some(([bx, by]) => bx === x && by === y) ? 'f' : ch))
+        .join(''),
+    ),
+  }));
+}
+
+export const PLAYER_FRAMES = salvagerFrames({});
+
+// ------------------------------------------------------------------ robot
+
+const ROBOT_PALETTE = {
+  o: '#0d1117', // outline
+  S: '#c3cddc', // chassis highlight
+  s: '#8d99ae', // chassis
+  d: '#5c6678', // chassis shade
+  c: '#2b3240', // core housing
+  C: '#5ef2ff', // core light
+  e: '#5ef2ff', // optics
+  t: '#2a2f3a', // tread
+  T: '#4a5160', // tread link
+  G: '#7b8494', // gun shade
+  g: '#e6ecf3', // gun
+};
+
+// Salvage robot seen from above, facing right, treads top and bottom.
+const ROBOT_BODY = [
+  '................',
+  '................',
+  '.tTtTtTtTtTtT...',
+  '.ooooooooooooo..',
+  '.oSSSSSSSsssdo..',
+  '.oSsssssssssdo..',
+  '.oSssscccsssdo..',
+  '.oSsscCCcsseeoGg',
+  '.oSsscCCcsseeoGg',
+  '.oSssscccsssdo..',
+  '.oSsssssssssdo..',
+  '.odddddddddddo..',
+  '.ooooooooooooo..',
+  '.TtTtTtTtTtTt...',
+  '................',
+  '................',
+];
+
+/** Robot frames: treads roll by swapping link colours. Same 4-frame layout as the salvager. */
+function robotFrames(colours: Record<string, string>): PixelSprite[] {
+  const rolled = ROBOT_BODY.map((row) => row.replace(/[tT]/g, (c) => (c === 't' ? 'T' : 't')));
+  return [ROBOT_BODY, rolled, ROBOT_BODY, rolled].map((rows) => ({
+    palette: { ...ROBOT_PALETTE, ...colours },
+    rows,
+  }));
+}
+
+export function characterFrames(id: 'salvager' | 'robot', colours: Record<string, string>): PixelSprite[] {
+  return id === 'robot' ? robotFrames(colours) : salvagerFrames(colours);
+}
+
+/** Power cell pickup, shown instead of O₂ canisters for the robot. */
+export const POWER_CELL: PixelSprite = {
+  palette: { k: '#1a1a08', y: '#ffd166', Y: '#fff2c2', g: '#3a3a2a' },
+  rows: [
+    '..kkkk..',
+    '.kggggk.',
+    '.kyyyyk.',
+    '.kyYyyk.',
+    '.kyyYyk.',
+    '.kyYYyk.',
+    '.kyyYyk.',
+    '.kyYyyk.',
+    '.kyyyyk.',
+    '..kkkk..',
+  ],
+};
 
 // ------------------------------------------------------------------ drone
 

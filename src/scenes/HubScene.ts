@@ -1,0 +1,56 @@
+import Phaser from 'phaser';
+import { dailySeed, randomSeed, type ResolvedSeed } from '../core/seed';
+import { HubView } from '../hub/HubView';
+import { clearSave, loadSave, storeSave } from '../storage';
+
+/** Between runs: a drifting starfield behind the HTML hub screens. */
+export class HubScene extends Phaser.Scene {
+  private view: HubView | null = null;
+  private stars: { img: Phaser.GameObjects.Image; speed: number }[] = [];
+
+  constructor() {
+    super('Hub');
+  }
+
+  create() {
+    this.stars = [];
+    for (let i = 0; i < 140; i++) {
+      const depth = Math.random();
+      const img = this.add
+        .image(Math.random() * this.scale.width, Math.random() * this.scale.height, 'star')
+        .setAlpha(0.25 + depth * 0.75)
+        .setScale(depth > 0.85 ? 2 : 1);
+      this.stars.push({ img, speed: 4 + depth * 22 });
+    }
+
+    this.view = new HubView(loadSave(), {
+      onSave: storeSave,
+      onReset: clearSave,
+      onLaunch: (daily) => this.launch(daily),
+    });
+    this.events.once('shutdown', () => {
+      this.view?.destroy();
+      this.view = null;
+    });
+  }
+
+  update(_time: number, delta: number) {
+    const { width, height } = this.scale;
+    for (const s of this.stars) {
+      s.img.x -= (s.speed * delta) / 1000;
+      if (s.img.x < -2) s.img.setPosition(width + 2, Math.random() * height);
+    }
+  }
+
+  private launch(daily: boolean) {
+    const run: ResolvedSeed = daily
+      ? { seed: dailySeed(new Date()), mode: 'daily' }
+      : { seed: randomSeed(), mode: 'random' };
+    try {
+      window.history.replaceState(null, '', daily ? '?daily' : `?seed=${run.seed}`);
+    } catch {
+      /* ignore */
+    }
+    this.scene.start('Game', run);
+  }
+}

@@ -1,6 +1,22 @@
 # Changelog
 
-## [0.1.1] — Unreleased
+## [0.2.0] — Unreleased
+
+### Added
+- Hub between runs, with Crew, Loadout, Upgrades and Log screens. Built as a responsive HTML overlay that works on phones.
+- Robot character (150 salvage): 30% armour, larger battery, slower, picks up power cells instead of O₂.
+- Permanent upgrades: hull plating, life support and servo boots (3 tiers each).
+- Railgun (180 salvage): heavy slug that pierces lines of drones.
+- Perks, one per run: Scavenger (+25% salvage), Cold cutter (cheap torch), Scrapper (drones always drop salvage), Second wind (survive one lethal hit).
+- Cosmetics: suit and visor colours for the salvager, chassis and optics colours for the robot.
+- Drones can drop salvage when destroyed.
+- Save data in browser storage, with export/import save codes and a reset option. Carries over the v0.1 best score.
+- End-of-run screen shows drones destroyed and your ship's hold, with Return to ship and Retry.
+
+### Changed
+- The game opens in the hub. Shared `?seed=` and `?daily` links still board that ship directly.
+
+## [0.1.1] — 2026-10-08
 
 ### Added
 - Touch controls: floating twin sticks (move / aim + auto-fire), GUN and TORCH buttons, tappable end-screen buttons.
