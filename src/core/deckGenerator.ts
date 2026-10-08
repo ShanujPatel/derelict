@@ -80,21 +80,6 @@ export function generateDeck(seed: string, options: Partial<DeckOptions> = {}): 
   return { seed, width, height, tiles, rooms, start, extraction, spawns, weakWalls };
 }
 
-/** Converts walls that don't touch any floor into Void tiles, for display only. */
-export function toDisplayTiles(tiles: readonly Tile[][]): Tile[][] {
-  return tiles.map((row, y) =>
-    row.map((tile, x) => {
-      if (tile !== Tile.Wall) return tile;
-      for (let dy = -1; dy <= 1; dy++) {
-        for (let dx = -1; dx <= 1; dx++) {
-          if (tiles[y + dy]?.[x + dx] === Tile.Floor) return Tile.Wall;
-        }
-      }
-      return Tile.Void;
-    }),
-  );
-}
-
 function centre(r: Room): Point {
   return { x: r.x + Math.floor(r.w / 2), y: r.y + Math.floor(r.h / 2) };
 }

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { DEFAULT_DECK_OPTIONS, generateDeck, toDisplayTiles } from '../src/core/deckGenerator';
+import { DEFAULT_DECK_OPTIONS, generateDeck } from '../src/core/deckGenerator';
 import { bfsDistances } from '../src/core/pathing';
 import { Tile } from '../src/core/types';
 
@@ -80,18 +80,5 @@ describe('generateDeck', () => {
       expect(s.value).toBeGreaterThanOrEqual(5);
       expect(s.value).toBeLessThanOrEqual(25);
     }
-  });
-});
-
-describe('toDisplayTiles', () => {
-  it('turns walls with no nearby floor into void, keeping floor and edge walls', () => {
-    const deck = generateDeck('display');
-    const display = toDisplayTiles(deck.tiles);
-    expect(display[0][0]).toBe(Tile.Void);
-    deck.tiles.forEach((row, y) =>
-      row.forEach((t, x) => {
-        if (t === Tile.Floor || t === Tile.WeakWall) expect(display[y][x]).toBe(t);
-      }),
-    );
   });
 });

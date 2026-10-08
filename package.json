@@ -1,7 +1,7 @@
 {
   "name": "derelict",
   "private": true,
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "A real-time, top-down sci-fi roguelike that runs in the browser.",
   "type": "module",
   "scripts": {

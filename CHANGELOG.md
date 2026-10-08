@@ -1,6 +1,18 @@
 # Changelog
 
-## [0.1.0] — Unreleased
+## [0.1.1] — Unreleased
+
+### Added
+- Touch controls: floating twin sticks (move / aim + auto-fire), GUN and TORCH buttons, tappable end-screen buttons.
+- Responsive screen sizing: fills phones in portrait and landscape, adapts live when the window or orientation changes.
+- Lighting: the ship is dark except round the player, the exit and blinking warning lamps.
+- New pixel art: 3/4 wall faces, wall shadows, floor grates, vents and hazard markings, starfield gaps.
+- Animated salvager (walk cycle) and drones (pulsing lights), drop shadows, muzzle flash, explosion rings.
+
+### Fixed
+- Walls next to cracked walls were drawn as open space.
+
+## [0.1.0] — 2026-10-08
 
 ### Added
 - Seeded procedural ship decks: rooms, two-tile corridors, loops, extraction in the furthest room.

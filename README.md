@@ -1,6 +1,6 @@
 # Derelict
 
-[![CI](https://github.com/YOUR-USERNAME/derelict/actions/workflows/ci.yml/badge.svg)](https://github.com/YOUR-USERNAME/derelict/actions/workflows/ci.yml)
+[![CI](https://github.com/ShanujPatel/derelict/actions/workflows/ci.yml/badge.svg)](https://github.com/ShanujPatel/derelict/actions/workflows/ci.yml)
 
 A real-time, top-down sci-fi roguelike that runs in the browser. Board abandoned ships, salvage what you can, and get out before your oxygen runs dry.
 
@@ -17,9 +17,13 @@ A real-time, top-down sci-fi roguelike that runs in the browser. Board abandoned
 | Swap gun | Q, 1 / 2, or mouse wheel |
 | Cutting torch | F or right click, facing a cracked wall |
 
+**On a phone or tablet:** left thumb moves, right thumb aims and fires. The **GUN** and **TORCH** buttons sit on the right. Works in portrait and landscape.
+
+<img src="docs/screenshot-mobile.png" alt="Mobile portrait screenshot" width="260">
+
 Find salvage crates and O₂ canisters, avoid or destroy the patrol drones, and reach the green extraction pad. Salvage only counts if you extract. The green arrow round your suit points to the exit.
 
-**Seeds:** every ship comes from a seed shown in the bottom-right corner. Share a ship with `?seed=YOURSEED`, or play today's shared ship with `?daily`.
+**Seeds:** every ship comes from a seed shown in the top-right corner. Share a ship with `?seed=YOURSEED`, or play today's shared ship with `?daily`.
 
 ## Running locally
 
@@ -45,10 +49,12 @@ npm run build      # production build in dist/
 
 ```
 src/
-  core/      Pure game logic: RNG, seeds, deck generator, pathing, oxygen, weapons.
+  core/      Pure game logic: RNG, seeds, deck generator, tile display rules,
+             pathing, oxygen, weapons, virtual-stick maths, screen sizing.
              No Phaser imports, so it's fully unit-tested.
   scenes/    Phaser scenes: Boot (builds textures) and Game.
-  art/       Placeholder pixel art defined in code.
+  ui/        Touch controls (twin virtual sticks).
+  art/       Original pixel art defined in code: no binary assets.
 tests/       Vitest unit tests for everything in core/.
 docs/        Game design document.
 ```
@@ -60,8 +66,9 @@ docs/        Game design document.
 See the full [game design document](docs/GDD.md).
 
 - [x] **v0.1** Salvager, freighter decks, drones, two guns, cutting torch, oxygen, seeded runs, CI/CD
+- [x] **v0.1.1** New pixel art, lighting, touch controls, portrait and landscape mobile support
 - [ ] **v0.2** Robot character, customisation, hub with permanent unlocks
-- [ ] **v0.3** Research vessels, alien enemies, codex chapter 1, touch controls, hacking tool
+- [ ] **v0.3** Research vessels, alien enemies, codex chapter 1, hacking tool
 - [ ] **v0.4** Daily leaderboard, rival salvagers, grav tool, railgun
 - [ ] **Later** Bosses, more codex chapters, more ship types
 
