@@ -1,7 +1,7 @@
 import type { Deck } from './deckGenerator';
 import { createRng } from './rng';
 import { hashString } from './seed';
-import type { Point } from './types';
+import type { EnemyKind, Point } from './types';
 
 /**
  * Deep dive: ordinary runs have a lift down to a deeper deck. Each level down
@@ -66,4 +66,6 @@ export interface Carry {
   logsFound: string[];
   /** When the dive started, so the run clock covers every deck. */
   elapsedMs: number;
+  /** Hall of fame tallies from the decks above. */
+  tally?: { kills: Partial<Record<EnemyKind, number>>; elites: number; bounties: number };
 }

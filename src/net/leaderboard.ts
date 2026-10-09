@@ -1,4 +1,5 @@
 import { checkSubmission, type BoardEntry, type ScoreSubmission } from '../core/leaderboard';
+import { checkRunReport, type BoardId, type HallEntry, type RunReport } from '../core/hallOfFame';
 
 /**
  * Tiny client for the Supabase leaderboard functions in docs/supabase.sql.
@@ -25,6 +26,10 @@ export interface LeaderboardClient {
   board(day: string, playerId: string, limit?: number): Promise<BoardEntry[]>;
   /** Reserves a name for this player. False if someone else already has it. */
   claimName(playerId: string, name: string): Promise<boolean>;
+  /** Adds a finished run to the player's all-time totals. */
+  submitRun(playerId: string, report: RunReport): Promise<void>;
+  /** One all-time board: the top players plus your row. */
+  hallOfFame(board: BoardId, playerId: string, limit?: number): Promise<HallEntry[]>;
 }
 
 export function createLeaderboardClient(
@@ -56,7 +61,9 @@ export function createLeaderboardClient(
         }
         throw new LeaderboardError(message);
       }
-      return (await res.json()) as T;
+      // Functions that return nothing answer 204 with an empty body.
+      const text = await res.text();
+      return (text ? JSON.parse(text) : null) as T;
     } catch (e) {
       if (e instanceof LeaderboardError) throw e;
       throw new LeaderboardError(controller.signal.aborted ? 'Leaderboard timed out' : 'Leaderboard unreachable');
@@ -85,6 +92,21 @@ export function createLeaderboardClient(
       const row = rows[0];
       if (!row) throw new LeaderboardError('No rank returned');
       return { rank: Number(row.rank), total: Number(row.total), best: Number(row.best) };
+    },
+
+    async submitRun(playerId, report) {
+      const check = checkRunReport(report);
+      if (!check.ok) throw new LeaderboardError(check.reason);
+      await call<null>('submit_run', { p_player: playerId, p_run: report });
+    },
+
+    async hallOfFame(board, playerId, limit = 20) {
+      const rows = await call<{ rank: number; callsign: string; value: number; is_you: boolean }[]>('get_hall_of_fame', {
+        p_board: board,
+        p_player: playerId || null,
+        p_limit: limit,
+      });
+      return (rows ?? []).map((r) => ({ rank: Number(r.rank), callsign: r.callsign, value: Number(r.value), isYou: r.is_you }));
     },
 
     async claimName(playerId, name) {

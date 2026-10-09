@@ -30,7 +30,7 @@ beforeAll(async () => {
 }, 60_000);
 
 beforeEach(async () => {
-  await db.exec('reset role; delete from daily_scores; delete from players;');
+  await db.exec('reset role; delete from daily_scores; delete from players; delete from player_totals;');
   await db.exec('set role anon');
 });
 
@@ -138,6 +138,103 @@ describe('supabase.sql', () => {
 
     it('hides the players table from the public role', async () => {
       await expect(db.query('select * from players')).rejects.toThrow(/permission denied/);
+    });
+  });
+
+  describe('hall of fame', () => {
+    const claim = (player: string, name: string) => db.query('select claim_callsign($1, $2)', [player, name]);
+    const run = (player: string, patch: Record<string, unknown> = {}) =>
+      db.query('select submit_run($1, $2)', [
+        player,
+        JSON.stringify({ extracted: true, salvage: 200, durationMs: 180_000, depth: 1, kills: { drone: 4, turret: 1 }, elites: 1, bounties: 0, ...patch }),
+      ]);
+    const board = async (name: string, player = P1, limit = 20) =>
+      (await db.query<{ rank: number; callsign: string; value: number; is_you: boolean }>('select * from get_hall_of_fame($1, $2, $3)', [name, player, limit])).rows.map(
+        (r) => [Number(r.rank), r.callsign, Number(r.value), r.is_you],
+      );
+
+    it('adds runs up into all-time totals and ranks them', async () => {
+      await claim(P1, 'NOVA');
+      await claim(P2, 'ACE');
+      await run(P1);
+      await run(P1, { salvage: 300, kills: { crawler: 7 } });
+      await run(P2, { salvage: 450, kills: { drone: 1 } });
+      await run(P2, { extracted: false, salvage: 900, durationMs: 600_000 });
+      expect(await board('banked')).toEqual([
+        [1, 'NOVA', 500, true],
+        [2, 'ACE', 450, false],
+      ]);
+      expect(await board('haul')).toEqual([
+        [1, 'ACE', 450, false],
+        [2, 'NOVA', 300, true],
+      ]);
+      expect(await board('kills')).toEqual([
+        [1, 'NOVA', 12, true],
+        // Lost runs still count kills: 1 + 5.
+        [2, 'ACE', 6, false],
+      ]);
+      expect(await board('crawler')).toEqual([[1, 'NOVA', 7, true]]);
+      expect(await board('extractions', P2)).toEqual([
+        [1, 'NOVA', 2, false],
+        [2, 'ACE', 1, true],
+      ]);
+    });
+
+    it('ranks boss boards by the fastest kill, extracted runs only', async () => {
+      await claim(P1, 'NOVA');
+      await claim(P2, 'ACE');
+      await run(P1, { boss: 'foreman', bossMs: 90_000 });
+      await run(P1, { boss: 'foreman', bossMs: 120_000 });
+      await run(P2, { boss: 'foreman', bossMs: 60_000, extracted: false });
+      await run(P2, { boss: 'foreman', bossMs: 80_000 });
+      expect(await board('foreman')).toEqual([
+        [1, 'ACE', 80_000, false],
+        [2, 'NOVA', 90_000, true],
+      ]);
+      expect(await board('mother')).toEqual([]);
+    });
+
+    it('works out the longest daily streak from daily scores', async () => {
+      await db.exec('reset role');
+      await claim(P1, 'NOVA');
+      for (const day of ['2026-10-01', '2026-10-02', '2026-10-03', '2026-10-05']) {
+        await db.query(
+          `insert into daily_scores (day, player_id, callsign, ship, crew, score, kills, duration_ms) values ($1, $2, 'NOVA', 'freighter', 'salvager', 10, 0, 100000)`,
+          [day, P1],
+        );
+      }
+      await db.exec('set role anon');
+      expect(await board('streak')).toEqual([[1, 'NOVA', 3, true]]);
+    });
+
+    it.each([
+      [{ durationMs: 5_000 }, 'run length'],
+      [{ depth: 9 }, 'depth'],
+      [{ salvage: 5000, durationMs: 3_600_000 }, 'salvage'],
+      [{ salvage: 900, durationMs: 30_000 }, 'salvage'],
+      [{ kills: { dragon: 1 } }, 'unknown hostile'],
+      [{ kills: { drone: -1 } }, 'kills out of range'],
+      [{ kills: { drone: 300 }, durationMs: 60_000, salvage: 0 }, 'kills too fast'],
+      [{ elites: 99 }, 'elites'],
+      [{ boss: 'foreman', bossMs: 5 }, 'boss time'],
+      [{ boss: 'kraken', bossMs: 50_000 }, 'boss time'],
+    ] as [Record<string, unknown>, string][])('rejects %o', async (patch, message) => {
+      await claim(P1, 'NOVA');
+      await expect(run(P1, patch)).rejects.toThrow(message);
+    });
+
+    it('needs a claimed name, rejects unknown boards, and hides the table', async () => {
+      await expect(run(P2)).rejects.toThrow('pick a name first');
+      await expect(board('lol')).rejects.toThrow('unknown board');
+      await expect(db.query('select * from player_totals')).rejects.toThrow(/permission denied/);
+    });
+
+    it('caps runs per day', async () => {
+      await claim(P1, 'NOVA');
+      await db.exec('reset role');
+      await db.query(`insert into player_totals (player_id, day, runs_today) values ($1, (now() at time zone 'utc')::date, 200)`, [P1]);
+      await db.exec('set role anon');
+      await expect(run(P1)).rejects.toThrow('too many runs');
     });
   });
 });

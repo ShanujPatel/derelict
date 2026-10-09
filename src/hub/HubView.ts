@@ -16,6 +16,7 @@ import { CHAPTERS, CODEX, chapterProgress } from '../core/codex';
 import { dailySeed, dailyShip } from '../core/seed';
 import { dayFromDailySeed, formatDuration, type BoardEntry } from '../core/leaderboard';
 import { leaderboard } from '../net/leaderboard';
+import { BOARDS, boardDef, type BoardGroup, type BoardId, type HallEntry } from '../core/hallOfFame';
 import { vesselName } from '../core/names';
 import { ACHIEVEMENTS } from '../core/achievements';
 import { conditionFor } from '../core/conditions';
@@ -94,6 +95,12 @@ export class HubView {
     loading: false,
     entries: null,
     error: null,
+  };
+  /** All-time boards, each cached for a minute. */
+  private hall: { board: BoardId; cache: Partial<Record<BoardId, { at: number; entries: HallEntry[] | null; error: string | null }>>; loading: BoardId | null } = {
+    board: 'banked',
+    cache: {},
+    loading: null,
   };
   private exportCode = '';
   private naming = false;
@@ -234,6 +241,12 @@ export class HubView {
         return this.rename(rollName(this.save, leaderboard));
       case 'refresh-board':
         this.board.at = 0;
+        return this.render();
+      case 'hall-board':
+        this.hall.board = d.board as BoardId;
+        return this.render();
+      case 'refresh-hall':
+        delete this.hall.cache[this.hall.board];
         return this.render();
       case 'export':
         return this.doExport();
@@ -637,7 +650,68 @@ export class HubView {
       ${this.weeklySection()}
       ${this.contractsSection()}
       <section class="hub-section"><h3>Top salvagers · ${day}</h3>${board}</section>
+      ${this.hallSection()}
       <p class="hub-note">Posting as <b>${esc(this.save.callsign)}</b>. Change your name in <button class="text-link" data-tab="crew">CREW</button>. No account needed; your save code carries it to other devices.</p>`;
+  }
+
+  /** Fetches the chosen all-time board at most once a minute. */
+  private loadHall() {
+    const id = this.hall.board;
+    const cached = this.hall.cache[id];
+    if (!leaderboard.enabled || this.hall.loading === id || (cached && Date.now() - cached.at < 60_000)) return;
+    this.hall.loading = id;
+    leaderboard
+      .hallOfFame(id, this.save.playerId)
+      .then((entries) => (this.hall.cache[id] = { at: Date.now(), entries, error: null }))
+      .catch((e: Error) => (this.hall.cache[id] = { at: Date.now(), entries: null, error: e.message }))
+      .finally(() => {
+        if (this.hall.loading === id) this.hall.loading = null;
+        if (this.tab === 'daily') this.render();
+      });
+  }
+
+  /** All-time boards: salvage, records, boss times and kills by hostile type. */
+  private hallSection(): string {
+    if (!leaderboard.enabled) return '';
+    this.loadHall();
+    const current = boardDef(this.hall.board);
+    const groups: BoardGroup[] = ['Salvage', 'Records', 'Bosses', 'Kills'];
+    const picker = groups
+      .map(
+        (g) => `<div class="hall-group"><span class="hall-group-name">${g}</span><div class="hall-chips">${BOARDS.filter((b) => b.group === g)
+          .map(
+            (b) =>
+              `<button class="chip" data-action="hall-board" data-board="${b.id}" aria-pressed="${b.id === current.id}">${esc(b.label)}</button>`,
+          )
+          .join('')}</div></div>`,
+      )
+      .join('');
+    const cached = this.hall.cache[current.id];
+    let list: string;
+    if (cached?.error) {
+      list = `<p class="hub-note">Couldn't load the hall of fame: ${esc(cached.error)}</p>`;
+    } else if (!cached?.entries) {
+      list = '<p class="hub-note">Loading…</p>';
+    } else if (cached.entries.length === 0) {
+      list = '<p class="hub-note">Nobody on this board yet. It could be you.</p>';
+    } else {
+      list = `<ol class="board hall">${cached.entries
+        .map(
+          (r) => `<li class="${r.isYou ? 'you' : ''} ${r.rank <= 3 ? 'top' : ''}">
+            <span class="b-rank">${r.rank}</span>
+            <span class="b-name">${esc(r.callsign)}${r.isYou ? ' <small>YOU</small>' : ''}</span>
+            <span class="b-score">${esc(current.format(Number(r.value)))}</span>
+          </li>`,
+        )
+        .join('')}</ol>`;
+    }
+    return `<section class="hub-section"><h3>Hall of fame · all time</h3>
+      <div class="hall-picker">${picker}</div>
+      <div class="hall-title">${esc(current.label)}</div>
+      ${list}
+      <div class="btn-row"><button class="btn ghost" data-action="refresh-hall">REFRESH</button></div>
+      <p class="hub-note">Every run you finish adds to your totals once your name is claimed (assist mode runs don't count). Lost runs still count kills; salvage only counts when you extract.</p>
+    </section>`;
   }
 
   /** This week's challenge: ship, mutators, your best. */

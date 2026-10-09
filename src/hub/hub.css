@@ -1269,3 +1269,77 @@
     letter-spacing: 0.04em;
   }
 }
+
+/* Hall of fame */
+.hall-picker {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-bottom: 10px;
+}
+
+.hall-group {
+  display: grid;
+  grid-template-columns: 5.5em 1fr;
+  gap: 8px;
+  align-items: start;
+}
+
+.hall-group-name {
+  color: var(--muted);
+  font-size: 11px;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  padding-top: 5px;
+}
+
+.hall-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+
+.chip {
+  font: inherit;
+  font-size: 11px;
+  color: var(--muted);
+  background: var(--panel);
+  border: 1px solid var(--line);
+  padding: 4px 8px;
+  cursor: pointer;
+}
+
+.chip[aria-pressed='true'] {
+  color: var(--cyan);
+  border-color: var(--cyan);
+}
+
+.hall-title {
+  color: var(--cyan);
+  font-size: 12px;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  margin-bottom: 6px;
+}
+
+.board.hall li {
+  grid-template-columns: 2.2em 1fr auto;
+}
+
+.board.hall li .b-rank {
+  color: var(--muted);
+}
+
+.board.hall li.top .b-rank {
+  color: var(--amber);
+}
+
+@media (max-width: 420px) {
+  .hall-group {
+    grid-template-columns: 1fr;
+    gap: 4px;
+  }
+  .hall-group-name {
+    padding-top: 0;
+  }
+}

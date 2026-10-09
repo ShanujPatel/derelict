@@ -1,6 +1,16 @@
 # Changelog
 
-## [0.8.0] — Unreleased: Deep salvage
+## [0.9.0] — Unreleased: Hall of fame
+
+### Added
+- **All-time hall of fame** (DAILY tab): 19 boards in four groups. *Salvage*: total banked, biggest single haul. *Records*: ships cleared, deepest dive, longest daily streak. *Bosses*: fastest Foreman and Bloom Mother kills. *Kills*: all hostiles, elites, bounties, and one board per hostile type (drones, turrets, mimics, crawlers, stalkers, spitters, egg sacs, raiders, brutes). Shows the top 20 plus your own row; each board is cached for a minute.
+- Every finished run (extracted or not) adds to your totals once your name is claimed. Kills count either way; salvage, extractions and boss times only count when you get out. Assist mode runs aren't posted. Kills by type, elites and bounties carry down deep-dive lifts.
+- Database: `player_totals` table, `submit_run` (checks run length, depth, salvage rate, kills per kind and per second, elites, bounties, boss times, and 200 runs a day per player) and `get_hall_of_fame`. Rules mirrored in `src/core/hallOfFame.ts`; both are tested (the SQL in PGlite).
+
+### Upgrading
+- Re-run `docs/supabase.sql` in the Supabase SQL Editor. Until then the hall of fame shows an error and runs aren't counted; the daily board keeps working.
+
+## [0.8.0] — 2026-10-09: Deep salvage
 
 ### Added
 - **Gamepad support** through the browser Gamepad API: left stick move, right stick aim, RT (or a full right-stick push) fire, A/LB roll, X/RB tool, Y swap, Back/B scanner, Start pause. Works in the hub (Start launches, Y boards the daily), the pause menu and the results screen. Moving the mouse hands aim back to it. Radial deadzone maths in `src/core/gamepad.ts`.

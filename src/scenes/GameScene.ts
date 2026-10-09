@@ -36,6 +36,7 @@ import { BossFight, ForemanFight, MotherFight, type BossHost } from './boss';
 import { ASSIST, applyRunResult, awardAchievements, recordStreak, markTipSeen, recordWeekly, computeRunStats, recordBossKill, recordRun, recordDaily, setClaimedName, type RunStats, type SaveData } from '../core/progression';
 import { hashString, type ResolvedSeed } from '../core/seed';
 import { ENEMY_KINDS, Tile, type EnemyKind, type Point } from '../core/types';
+import { checkRunReport, type RunReport } from '../core/hallOfFame';
 import { WEAPONS, chainTargets, pelletAngles, type WeaponDef } from '../core/weapons';
 import { leaderboard } from '../net/leaderboard';
 import { loadSave, storeSave } from '../storage';
@@ -164,6 +165,10 @@ export class GameScene extends Phaser.Scene implements EnemyWorld, BossHost {
   private bulkhead: Phaser.GameObjects.Image | null = null;
   private bossDefeated: { id: BossId; ms: number } | null = null;
   private elitesKilled = 0;
+  /** Kills by type over the whole dive, plus elites and bounties from decks above (hall of fame). */
+  private killsByKind: Partial<Record<EnemyKind, number>> = {};
+  private priorElites = 0;
+  private priorBounties = 0;
   private conditionText!: Phaser.GameObjects.Text;
   private stats!: RunStats;
   private pendingLog: LogEntry | null = null;
@@ -279,6 +284,9 @@ export class GameScene extends Phaser.Scene implements EnemyWorld, BossHost {
     this.resultActions = null;
     this.lastRank = undefined;
     this.elitesKilled = 0;
+    this.killsByKind = carry?.tally ? { ...carry.tally.kills } : {};
+    this.priorElites = carry?.tally?.elites ?? 0;
+    this.priorBounties = carry?.tally?.bounties ?? 0;
     const assist = this.saveAtStart.settings.assist;
     this.oxygen = createOxygen(
       Math.round(this.stats.capacity * (assist ? ASSIST.capacity : 1)),
@@ -1289,6 +1297,11 @@ export class GameScene extends Phaser.Scene implements EnemyWorld, BossHost {
       kills: this.kills,
       logsFound: this.logsFound,
       elapsedMs: this.time.now - this.runStartedAt,
+      tally: {
+        kills: { ...this.killsByKind },
+        elites: this.priorElites + this.elitesKilled,
+        bounties: this.priorBounties + this.bountiesClaimed,
+      },
     };
     audio.play('launch');
     this.player.setVelocity(0, 0);
@@ -1594,6 +1607,7 @@ export class GameScene extends Phaser.Scene implements EnemyWorld, BossHost {
     const parent = enemy.getData('parent') as Sprite | undefined;
     if (parent?.active) parent.setData('brood', Math.max(0, (parent.getData('brood') ?? 1) - 1));
     this.kills += 1;
+    this.killsByKind[kind] = (this.killsByKind[kind] ?? 0) + 1;
     if (kind === 'egg') this.eggsDestroyed += 1;
     if (RIVAL_KINDS.includes(kind)) this.rivalsKilled += 1;
     if (this.mods.healOnKill && this.hp < this.stats.maxHp) {
@@ -1718,6 +1732,28 @@ export class GameScene extends Phaser.Scene implements EnemyWorld, BossHost {
       this.floatText(item.x, item.y, mult > 1 ? `+${amount} ×${mult.toFixed(1)}` : `+${amount}`, mult > 1 ? '#ffd166' : '#e8b04a');
     }
     item.destroy();
+  }
+
+  /**
+   * Adds this run to your all-time totals (Log → Hall of fame). Only once your
+   * name is claimed, never in assist mode, and quietly: a failure just skips it.
+   */
+  private postToHallOfFame(extracted: boolean, durationMs: number, save: SaveData) {
+    if (!leaderboard.enabled || this.saveAtStart.settings.assist) return;
+    if (!save.callsignClaimed || save.callsign !== save.callsignClaimed) return;
+    const report: RunReport = {
+      extracted,
+      salvage: extracted ? this.salvage : 0,
+      durationMs: Math.round(durationMs),
+      depth: this.depth,
+      kills: { ...this.killsByKind },
+      elites: this.priorElites + this.elitesKilled,
+      bounties: this.priorBounties + this.bountiesClaimed,
+      boss: extracted && this.bossDefeated ? this.bossDefeated.id : null,
+      bossMs: extracted && this.bossDefeated ? Math.round(this.bossDefeated.ms) : null,
+    };
+    if (!checkRunReport(report).ok) return;
+    leaderboard.submitRun(save.playerId, report).catch(() => undefined);
   }
 
   private endRun(extracted: boolean, reason = '') {
@@ -1938,6 +1974,8 @@ export class GameScene extends Phaser.Scene implements EnemyWorld, BossHost {
           })
           .on('pointerup', onTap),
       );
+
+    this.postToHallOfFame(extracted, durationMs, after);
 
     // Daily Derelict: post the score and show the rank when it comes back.
     if (day && extracted) {

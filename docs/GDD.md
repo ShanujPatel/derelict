@@ -161,6 +161,12 @@ Opt-in runs from the DAILY tab (unlocked after 3 extractions; the Bloom Mother a
 - **Power-ups:** Overdrive (×2 fire rate, 8 s), Aegis (absorbs 2 hits); guaranteed from elites/bounties, 4% otherwise. **Turrets** lock on for 0.55 s with a visible laser before firing. **Self-repair** perk (robot): 3 HP/s for 2.4 battery/s after 4 s without damage.
 - **Accessibility:** assist mode (+50% O₂, ×0.5 damage, no leaderboard post), corner minimap, first-time tips (10), field manual, motion toggles.
 
+## 9e. Hall of fame (v0.9)
+
+- One `player_totals` row per claimed player, updated by `submit_run` at the end of every run (not assist mode). Lost runs add kills, elites, bounties and run count; extractions also add salvage banked, best haul, deepest dive and boss best times.
+- 19 boards: banked, haul, extractions, depth, streak (computed from consecutive `daily_scores` days), foreman, mother (fastest first), kills, elite, bounty, and one per hostile type. Top 20 plus your own row.
+- Anti-cheat limits live in `src/core/hallOfFame.ts` (client) and `submit_run` (server).
+
 ## 10. Art and audio
 
 - **Pixel art**, 16×16 tiles, limited palette per ship type (cold blues for freighters, sickly greens for research vessels).
@@ -211,6 +217,7 @@ Each version is a tagged GitHub release with notes.
 | **v0.6** ✅ | Field kit: dodge roll, scanner map, explosive drums, supply drops, ship conditions, elites, achievements |
 | **v0.7** ✅ | Boss contracts: the Foreman and the Bloom Mother in handcrafted three-part arenas |
 | **v0.8** ✅ | Deep salvage: gamepad, deep dive, weekly challenge, streaks, arc caster, sentry, 3 perks, mimics, stalkers, shock floors, bounties, combos, codex chapter 2, run history, tips, field manual, assist mode, trophy cosmetics, share card |
+| **v0.9** ✅ | All-time hall of fame: salvage, records, boss times, kills by hostile type |
 | **Later** | Codex chapter 3; more ship types; more bosses; online weekly board |
 
 ## 13. Open questions
