@@ -30,7 +30,7 @@ export function randomSeed(random: () => number = Math.random, length = 6): stri
   return out;
 }
 
-export type SeedMode = 'daily' | 'weekly' | 'custom' | 'random' | 'boss';
+export type SeedMode = 'daily' | 'weekly' | 'custom' | 'random' | 'boss' | 'tutorial';
 
 export interface ResolvedSeed {
   seed: string;
@@ -61,6 +61,7 @@ const parseShip = (value: string | null): ShipType =>
  *   ?weekly                    -> this week's challenge (ship + two mutators)
  *   ?seed=ABC123[&ship=research] -> a specific ship
  *   ?boss=foreman[&seed=ABC123]  -> a boss contract arena
+ *   ?tutorial                  -> the training run
  *   (nothing)                  -> a random freighter
  */
 export function resolveSeed(
@@ -69,6 +70,7 @@ export function resolveSeed(
   random: () => number = Math.random,
 ): ResolvedSeed {
   const params = new URLSearchParams(search);
+  if (params.has('tutorial')) return { seed: 'training', mode: 'tutorial', ship: 'freighter' };
   if (params.has('daily')) {
     const seed = dailySeed(now);
     return { seed, mode: 'daily', ship: dailyShip(seed) };
@@ -90,6 +92,7 @@ export function resolveSeed(
 
 /** Query string that reproduces a run, for the address bar and sharing. */
 export function seedQuery(run: ResolvedSeed): string {
+  if (run.mode === 'tutorial') return '?tutorial';
   if (run.mode === 'daily') return '?daily';
   if (run.mode === 'weekly') return '?weekly';
   if (run.boss) return `?boss=${run.boss}&seed=${run.seed}`;

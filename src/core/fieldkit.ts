@@ -127,6 +127,8 @@ export interface Hazard {
   h: number;
   /** Offset into the cycle, so patches don't all fire together. */
   phaseMs: number;
+  /** Live all the time (the training run's roll lesson). */
+  alwaysOn?: boolean;
 }
 
 export const SHOCK = {

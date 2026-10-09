@@ -12,6 +12,8 @@ Three ship types, three bosses, clans, an online daily and weekly board with gho
 
 ## How to play
 
+**New?** Start with the **training run** (offered on your first visit, or any time from **Log → Training**, or with [`?tutorial`](https://ShanujPatel.github.io/derelict/?tutorial)). It's a small guided ship, about three minutes long: each room teaches one thing (moving, salvage, oxygen and health, shooting, the dodge roll, the cutting torch, fuel drums, the scanner and extracting) and the next door only opens once you've done it. The prompts match your controls (keyboard, touch or gamepad), and finishing it pays +100 salvage once.
+
 | Action | Keyboard + mouse | Gamepad |
 |---|---|---|
 | Move | WASD / arrow keys | Left stick |
@@ -174,6 +176,7 @@ See the full [game design document](docs/GDD.md).
 - [x] **v0.9** All-time hall of fame: salvage, records, boss times and kills by hostile type
 - [x] **v1.0** Mining haulers (sappers, sweeper lasers, ore veins), the Hollow Captain, codex chapter 3, weekly online board, daily ghost replays, seed explorer, installable offline app, faster loading
 - [x] **v1.1** Clans: open or invite-only crews of up to 15, weekly and all-time clan boards, weekly goals, tags on every board
+- [x] **v1.2** Training run: a guided first ship that teaches every basic
 - [ ] **Later** Codex chapter 4 (the survey ship *Caldera*), ghost races against friends, more bosses
 
 ## Licence

@@ -1,5 +1,15 @@
 # Changelog
 
+## [1.2.0] — Unreleased: Training
+
+### Added
+- **Training run**: a handcrafted seven-room ship with nine steps (move, salvage, supplies, shoot, dodge roll, cutting torch, fuel drums, scanner, extract). Each sealed door opens once its step is done; prompts are written for keyboard, touch or gamepad. Training drones hold still, the roll room has an always-live floor, one torch cut opens the cracked doorway, and it always uses the torch whatever tool you've equipped.
+- New players see a **New to Derelict?** card at the top of CREW (START TRAINING or NOT NOW); everyone can replay it from **Log → Training** or `?tutorial`. Finishing pays +100 salvage once. Older saves with 3+ runs aren't shown the card.
+- Training runs don't count towards history, achievements, leaderboards or clans.
+
+### Fixed
+- The clan card no longer shows an empty "[undefined]" clan if the server sends an empty reply.
+
 ## [1.1.0] — Unreleased: Clans
 
 ### Added

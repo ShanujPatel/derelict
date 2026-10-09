@@ -23,6 +23,15 @@ import { GRAV_CONE, GRAV_RANGE, hitsShield, inGravCone, rivalEvent, type RivalEv
 import { newAchievements, type Achievement } from '../core/achievements';
 import { CONDITIONS, ELITE, conditionFor, isElite, type Condition } from '../core/conditions';
 import { SECTIONS, generateArena, type ArenaDeck } from '../core/arena';
+import { TOOLS } from '../core/catalog';
+import {
+  TRAINING_REWARD,
+  TRAINING_STEPS,
+  generateTraining,
+  trainingText,
+  type TrainingDeck,
+  type TrainingStepId,
+} from '../core/training';
 import { BOUNTY, BOUNTY_KINDS, bountyFor } from '../core/bounty';
 import { TIP_IDS, nextTip, tipText, type TipId } from '../core/tips';
 import { shareText } from '../core/share';
@@ -33,7 +42,7 @@ import { NO_COMBO, comboAfterPickup, comboMultiplier, comboTimeLeft, type ComboS
 import { NO_EFFECTS, combineMutators, weekFromSeed, weeklySetup, type Mutator, type MutatorEffects } from '../core/weekly';
 import { BOSSES, CAPTAIN, FOREMAN, MOTHER, type BossId } from '../core/bosses';
 import { BossFight, CaptainFight, ForemanFight, MotherFight, type BossHost } from './boss';
-import { ASSIST, applyRunResult, canBoard, setClanCache, awardAchievements, recordStreak, markTipSeen, recordWeekly, computeRunStats, recordBossKill, recordRun, recordDaily, setClaimedName, type RunStats, type SaveData } from '../core/progression';
+import { ASSIST, applyRunResult, canBoard, completeTraining, setClanCache, awardAchievements, recordStreak, markTipSeen, recordWeekly, computeRunStats, recordBossKill, recordRun, recordDaily, setClaimedName, type RunStats, type SaveData } from '../core/progression';
 import { hashString, type ResolvedSeed } from '../core/seed';
 import { ENEMY_KINDS, Tile, type EnemyKind, type Point } from '../core/types';
 import { checkRunReport, type RunReport } from '../core/hallOfFame';
@@ -223,6 +232,14 @@ export class GameScene extends Phaser.Scene implements EnemyWorld, BossHost {
   private hacks = 0;
   /** Ore veins cut open this run (mining haulers). */
   private oreVeins = 0;
+  /** Training run (mode 'tutorial'): the deck, which step you're on, and its bits on screen. */
+  private training: TrainingDeck | null = null;
+  private trainingStep = 0;
+  private trainingDrones: Sprite[] = [];
+  private trainingMapSeen = false;
+  private trainingGfx!: Phaser.GameObjects.Graphics;
+  private trainingDoors = new Map<TrainingStepId, Phaser.GameObjects.Image>();
+  private trainingPrompt: { panel: Phaser.GameObjects.Rectangle; title: Phaser.GameObjects.Text; body: Phaser.GameObjects.Text } | null = null;
   /** Daily runs: your path (to post as a ghost) and the ghost you're racing. */
   private ghostRecorder: GhostRecorder | null = null;
   private ghostView: GhostView | null = null;
@@ -257,7 +274,10 @@ export class GameScene extends Phaser.Scene implements EnemyWorld, BossHost {
     this.liftPad = null;
     this.descending = false;
     // Boss contracts are fought as designed: no random condition, no elites, no rivals, no data logs.
-    this.condition = this.run.boss ? { ...CONDITIONS.calm, eliteChance: 0 } : conditionFor(this.run.seed, this.run.ship);
+    const scripted = !!this.run.boss || this.run.mode === 'tutorial';
+    this.condition = scripted ? { ...CONDITIONS.calm, eliteChance: 0 } : conditionFor(this.run.seed, this.run.ship);
+    // Training always teaches the cutting torch.
+    if (this.run.mode === 'tutorial') this.stats = { ...this.stats, tool: TOOLS.torch };
     // Weekly challenge mutators fold into the ship's condition where they overlap.
     this.mutators = this.run.mode === 'weekly' ? weeklySetup(this.run.seed).mutators : [];
     this.mods = combineMutators(this.mutators);
@@ -324,8 +344,9 @@ export class GameScene extends Phaser.Scene implements EnemyWorld, BossHost {
     this.invulnerableUntil = 0;
     this.hack = null;
     this.rivals = rivalEvent(this.run.seed, this.run.ship);
-    this.rivalsArrived = !!this.run.boss;
-    if (this.run.boss) this.pendingLog = null;
+    this.rivalsArrived = scripted;
+    if (scripted) this.pendingLog = null;
+    this.trainingPrompt = null;
     this.nextStepAt = 0;
     this.nextHeartbeatAt = 0;
     this.nextHackTickAt = 0;
@@ -358,7 +379,8 @@ export class GameScene extends Phaser.Scene implements EnemyWorld, BossHost {
   create() {
     this.physics.resume();
     this.arena = this.run.boss ? generateArena(this.run.seed, this.run.boss) : null;
-    this.deck = this.arena ?? generateDeck(this.run.seed, this.run.ship);
+    this.training = this.run.mode === 'tutorial' ? generateTraining() : null;
+    this.deck = this.training ?? this.arena ?? generateDeck(this.run.seed, this.run.ship);
     this.grid = this.deck.tiles.map((row) => [...row]);
     this.explored = createExplored(this.deck.width, this.deck.height);
 
@@ -448,7 +470,7 @@ export class GameScene extends Phaser.Scene implements EnemyWorld, BossHost {
 
     let enemyIndex = 0;
     // One named hostile per ordinary run carries a bounty.
-    const eligible = this.arena ? [] : this.deck.spawns.filter((s) => BOUNTY_KINDS.includes(s.kind as EnemyKind));
+    const eligible = this.arena || this.training ? [] : this.deck.spawns.filter((s) => BOUNTY_KINDS.includes(s.kind as EnemyKind));
     const bounty = bountyFor(this.run.seed, this.run.ship, eligible.length);
     const bountySpawn = bounty ? eligible[bounty.index] : null;
     for (const s of this.deck.spawns) {
@@ -488,6 +510,7 @@ export class GameScene extends Phaser.Scene implements EnemyWorld, BossHost {
     }
 
     if (this.arena) this.setupArena(this.arena);
+    else if (this.training) this.setupTraining(this.training);
     else this.setupLift();
     this.hazardGfx = this.add.graphics().setDepth(3);
     this.laserGfx = this.add.graphics().setDepth(12);
@@ -593,7 +616,7 @@ export class GameScene extends Phaser.Scene implements EnemyWorld, BossHost {
     this.comboText = fixed(this.add.text(0, 0, '', { ...FONT, color: '#ffd166' }).setOrigin(1, 0));
     this.powerText = fixed(this.add.text(0, 0, '', { ...FONT, fontSize: '9px', color: '#ff9a3c' }));
     this.weaponText = fixed(this.add.text(0, 0, '', FONT));
-    const label = this.run.mode === 'daily' || this.run.mode === 'weekly' ? this.run.seed.toUpperCase() : `SEED ${this.run.seed}`;
+    const label = this.run.mode === 'tutorial' ? 'TRAINING' : this.run.mode === 'daily' || this.run.mode === 'weekly' ? this.run.seed.toUpperCase() : `SEED ${this.run.seed}`;
     this.seedText = fixed(this.add.text(0, 0, label, { ...FONT, color: '#6f7fa3' }).setOrigin(1, 0));
     this.conditionText = fixed(
       this.add
@@ -638,7 +661,9 @@ export class GameScene extends Phaser.Scene implements EnemyWorld, BossHost {
       : this.touch.enabled
       ? `Left thumb: move · right thumb: aim + fire\nGUN: swap · ROLL: dodge · ${TOOL_LABEL[this.stats.tool.id]}: ${toolHint}\nMAP: scanner · reach the green EXIT`
       : `WASD move · mouse aim + fire · Q swap gun · Shift/Space roll\nF / right-click: ${toolHint} · Tab: scanner map · reach the green EXIT`;
-    const title = this.run.boss
+    const title = this.training
+      ? 'TRAINING RUN'
+      : this.run.boss
       ? `CONTRACT · ${BOSSES[this.run.boss].arena.toUpperCase()}`
       : this.depth > 1
         ? `DEPTH ${this.depth} · RICHER, NASTIER`
@@ -682,6 +707,210 @@ export class GameScene extends Phaser.Scene implements EnemyWorld, BossHost {
       this.tweens.add({ targets: cond, alpha: 0, delay: 3200, duration: 700 });
     }
     this.tweens.add({ targets: hint, alpha: 0, delay: 7000, duration: 800 });
+    // Training explains things one step at a time instead.
+    if (this.training) hint.setVisible(false);
+  }
+
+  // ---------------------------------------------------------------- training run (v1.2)
+
+  /** Sets up the current training step: its prompt, and anything it needs (drones, low air). */
+  private startTrainingStep() {
+    const t = this.training;
+    if (!t) return;
+    const step = TRAINING_STEPS[this.trainingStep];
+    if (!step) return;
+    const deck = t;
+    if (step.id === 'supplies') {
+      // Make the lesson real: low air and a few scratches.
+      this.oxygen = { ...this.oxygen, current: Math.min(this.oxygen.current, this.oxygen.max * 0.4) };
+      this.hp = Math.min(this.hp, Math.round(this.stats.maxHp * 0.55));
+      this.floatText(this.player.x, this.player.y - 16, 'AIR LOW · HURT', '#ff9a3c');
+    }
+    for (const p of deck.drones[step.id] ?? []) {
+      const { x, y } = toWorld(p);
+      const e = this.spawnEnemy('drone', x, y);
+      // Training drones hold position and go down quickly.
+      e.setData({ pinned: true, hp: step.id === 'drum' ? 3 : 2, alertUntil: 0 });
+      this.trainingDrones.push(e);
+      this.explosionAt(x, y, 6);
+    }
+    this.drawTrainingPrompt();
+    audio.play('ui');
+  }
+
+  /** Checks whether the current step is done; if so opens its door and moves on. */
+  private updateTraining(time: number) {
+    const t = this.training;
+    if (!t || this.ended) return;
+    const step = TRAINING_STEPS[this.trainingStep];
+    if (!step) return;
+    // The marker for step 1.
+    const g = this.trainingGfx.clear();
+    if (step.id === 'move') {
+      const m = toWorld(t.marker);
+      const r = 9 + Math.sin(time / 180) * 2;
+      g.lineStyle(2, 0x3dff9a, 0.9).strokeCircle(m.x, m.y, r);
+      g.fillStyle(0x3dff9a, 0.18).fillCircle(m.x, m.y, r);
+    }
+    const inRoom = (s: Sprite, i: number) => {
+      const r = t.rooms[i];
+      const p = this.tileAt(s.x, s.y);
+      return p.x >= r.x && p.x < r.x + r.w && p.y >= r.y && p.y < r.y + r.h;
+    };
+    const pickupsLeft = (kinds: string[], room: number) =>
+      (this.pickups.getChildren() as Sprite[]).filter((p) => p.active && kinds.includes(p.getData('kind')) && inRoom(p, room)).length;
+    const dronesLeft = this.trainingDrones.filter((d) => d.active).length;
+    let done = false;
+    switch (step.id) {
+      case 'move':
+        done = Phaser.Math.Distance.Between(this.player.x, this.player.y, toWorld(t.marker).x, toWorld(t.marker).y) < 14;
+        break;
+      case 'salvage':
+        done = pickupsLeft(['salvage'], 1) === 0;
+        break;
+      case 'supplies':
+        done = pickupsLeft(['oxygen', 'medkit'], 2) === 0;
+        break;
+      case 'shoot':
+      case 'drum':
+        done = this.trainingDrones.length > 0 && dronesLeft === 0;
+        break;
+      case 'roll':
+        done = this.tileAt(this.player.x, this.player.y).x >= t.rollLine;
+        break;
+      case 'torch':
+        done = t.weakWalls.every((p) => this.grid[p.y][p.x] !== Tile.WeakWall);
+        break;
+      case 'scanner':
+        done = this.trainingMapSeen;
+        break;
+      case 'extract':
+        done = false; // finished by stepping on the exit
+        break;
+    }
+    if (!done) return;
+    for (const p of t.gates[step.id] ?? []) this.cutTile(p.x, p.y);
+    const door = this.trainingDoors.get(step.id);
+    if (door) {
+      this.tweens.add({ targets: door, alpha: 0, scaleY: 0.2, duration: 500, onComplete: () => door.destroy() });
+      audio.play('doorOpen');
+    } else audio.play('achievement');
+    this.floatText(this.player.x, this.player.y - 18, `✓ ${step.title}`, '#3dff9a');
+    this.trainingDrones = [];
+    this.trainingStep += 1;
+    this.time.delayedCall(450, () => !this.ended && this.startTrainingStep());
+  }
+
+  /** The step prompt: "TRAINING 3/9 · SUPPLIES" and what to do, in your controls. */
+  private drawTrainingPrompt() {
+    const step = TRAINING_STEPS[this.trainingStep];
+    if (!step || !this.trainingPrompt) return;
+    const scheme = pad.connected && pad.active ? 'pad' : this.touch.enabled ? 'touch' : 'keyboard';
+    const { width: w, height: h } = this.scale;
+    this.trainingPrompt.title.setText(`TRAINING ${this.trainingStep + 1}/${TRAINING_STEPS.length} · ${step.title}`);
+    this.trainingPrompt.body.setText(trainingText(step, scheme)).setWordWrapWidth(Math.min(w - 32, 420));
+    // Bottom of the screen on desktop; under the HUD on touch screens, clear of the thumb sticks.
+    const y = this.touch.enabled ? 64 : h - 14 - this.trainingPrompt.body.height;
+    this.trainingPrompt.title.setPosition(w / 2, y - 12);
+    this.trainingPrompt.body.setPosition(w / 2, y);
+    const pw = Math.max(this.trainingPrompt.body.width, this.trainingPrompt.title.width) + 20;
+    this.trainingPrompt.panel.setPosition(w / 2, y - 16).setSize(pw, this.trainingPrompt.body.height + 24);
+    for (const o of [this.trainingPrompt.panel, this.trainingPrompt.title, this.trainingPrompt.body]) {
+      this.tweens.add({ targets: o, alpha: { from: 0.2, to: 1 }, duration: 250 });
+    }
+  }
+
+  private setupTraining(t: TrainingDeck) {
+    this.trainingGfx = this.add.graphics().setDepth(3);
+    this.trainingDoors = new Map();
+    // Sealed doors look like bulkheads until their step is done.
+    for (const [id, tiles] of Object.entries(t.gates) as [TrainingStepId, Point[]][]) {
+      const top = toWorld(tiles[0]);
+      const door = this.add.image(top.x, top.y + TILE_SIZE / 2, 'bulkhead').setAngle(90).setDepth(7);
+      this.trainingDoors.set(id, door);
+    }
+    const panel = this.add.rectangle(0, 0, 10, 10, 0x05070c, 0.82).setOrigin(0.5, 0).setStrokeStyle(1, 0x3dff9a, 0.6);
+    const title = this.add.text(0, 0, '', { ...FONT, fontSize: '9px', color: '#3dff9a' }).setOrigin(0.5, 0);
+    const body = this.add.text(0, 0, '', { ...FONT, fontSize: '10px', align: 'center', wordWrap: { width: 400 } }).setOrigin(0.5, 0);
+    for (const o of [panel, title, body]) o.setScrollFactor(0).setDepth(250);
+    this.trainingPrompt = { panel, title, body };
+    this.trainingStep = 0;
+    this.trainingDrones = [];
+    this.trainingMapSeen = false;
+    this.time.delayedCall(1200, () => this.startTrainingStep());
+  }
+
+  /** The end of training: no score, just a pat on the back (and a one-off reward). */
+  private endTraining(extracted: boolean, reason: string) {
+    const { width: w, height: h } = this.scale;
+    const done = extracted && this.trainingStep >= TRAINING_STEPS.length - 1;
+    let paid = false;
+    if (done) {
+      const r = completeTraining(loadSave(), TRAINING_REWARD);
+      paid = r.paid;
+      storeSave(r.save);
+    }
+    for (const o of this.trainingPrompt ? [this.trainingPrompt.panel, this.trainingPrompt.title, this.trainingPrompt.body] : []) o.setVisible(false);
+    const ui = <T extends Phaser.GameObjects.Text | Phaser.GameObjects.Rectangle>(o: T) => {
+      o.setScrollFactor(0).setDepth(300);
+      this.endScreen.push(o);
+      return o;
+    };
+    this.time.delayedCall(extracted ? 800 : 950, () => {
+      ui(this.add.rectangle(w / 2, h / 2, w, h, 0x05070c, 0.85));
+      ui(
+        this.add
+          .text(w / 2, h / 2 - 60, done ? 'TRAINING COMPLETE' : extracted ? 'TRAINING OVER' : 'SIGNAL LOST', {
+            ...FONT,
+            fontSize: '18px',
+            color: done ? '#3dff9a' : '#ff9a3c',
+          })
+          .setOrigin(0.5),
+      );
+      const lines = done
+        ? [
+            "You know the basics. Real ships are bigger, darker,",
+            'and the things aboard fight back.',
+            '',
+            paid ? `+${TRAINING_REWARD} salvage for finishing training` : 'Training finished again: no reward this time.',
+            'Spend salvage on upgrades back on your ship.',
+          ]
+        : [reason || 'Training ended early.', '', 'Replay it any time from LOG → Field manual.'];
+      ui(this.add.text(w / 2, h / 2 - 16, lines.join('\n'), { ...FONT, fontSize: '10px', align: 'center', wordWrap: { width: w - 32 } }).setOrigin(0.5));
+      const button = (y: number, label: string, onTap: () => void) =>
+        ui(
+          this.add
+            .text(w / 2, y, label, { ...FONT, fontSize: '11px', backgroundColor: '#1b2333', padding: { x: 10, y: 5 } })
+            .setOrigin(0.5)
+            .setInteractive({ useHandCursor: true })
+            .on('pointerover', function (this: Phaser.GameObjects.Text) {
+              this.setColor('#ffd166');
+            })
+            .on('pointerout', function (this: Phaser.GameObjects.Text) {
+              this.setColor('#d7e3ff');
+            })
+            .on('pointerup', onTap),
+        );
+      const hub = () => {
+        audio.play('ui');
+        try {
+          window.history.replaceState(null, '', window.location.pathname);
+        } catch {
+          /* ignore */
+        }
+        this.scene.start('Hub');
+      };
+      const retry = () => {
+        audio.play('launch');
+        this.scene.restart({ ...this.run });
+      };
+      const top = Math.min(h / 2 + 40, h - 50);
+      button(top, this.touch.enabled ? 'RETURN TO SHIP' : 'RETURN TO SHIP  [ENTER]', hub);
+      button(top + 26, this.touch.enabled ? 'PLAY TRAINING AGAIN' : 'PLAY TRAINING AGAIN  [R]', retry);
+      this.input.keyboard?.once('keydown-ENTER', hub);
+      this.input.keyboard?.once('keydown-R', retry);
+      this.resultActions = { hub, retry, share: () => undefined };
+    });
   }
 
   // ---------------------------------------------------------------- EnemyWorld
@@ -916,7 +1145,8 @@ export class GameScene extends Phaser.Scene implements EnemyWorld, BossHost {
     this.updateMines(time);
     this.drawTurretLasers(time);
     this.updateSelfRepair(time, seconds);
-    this.updateTips(time);
+    if (this.training) this.updateTraining(time);
+    else this.updateTips(time);
     this.updateScanner(time);
     this.drawLighting();
     this.drawHud();
@@ -932,6 +1162,7 @@ export class GameScene extends Phaser.Scene implements EnemyWorld, BossHost {
     if (Phaser.Input.Keyboard.JustDown(this.keys.TAB) || this.touch.consume('map') || pad.justPressed(PAD.BACK) || pad.justPressed(PAD.B)) {
       this.mapOpen = !this.mapOpen;
       this.mapDirty = true;
+      if (this.mapOpen && this.training && TRAINING_STEPS[this.trainingStep]?.id === 'scanner') this.trainingMapSeen = true;
       audio.play('scan');
     }
     this.mapTiles.setVisible(this.mapOpen);
@@ -1296,6 +1527,10 @@ export class GameScene extends Phaser.Scene implements EnemyWorld, BossHost {
       if (this.grid[t.y]?.[t.x] !== Tile.WeakWall) continue;
 
       this.cutTile(t.x, t.y);
+      // Training: one cut opens the whole cracked doorway.
+      for (const p of this.training?.weakWalls ?? []) {
+        if (this.grid[p.y][p.x] === Tile.WeakWall && Math.abs(p.x - t.x) + Math.abs(p.y - t.y) <= 2) this.cutTile(p.x, p.y);
+      }
       // A weak wall can be two tiles thick; open the neighbour in the same line too.
       const nx = t.x + Math.round(Math.cos(aim));
       const ny = t.y + Math.round(Math.sin(aim));
@@ -1491,7 +1726,7 @@ export class GameScene extends Phaser.Scene implements EnemyWorld, BossHost {
     if (tick) this.nextShockTick = time + SHOCK.enemyTickMs;
     const you = this.tileAt(this.player.x, this.player.y);
     for (const h of hazards) {
-      const state = shockState(time, h.phaseMs);
+      const state = h.alwaysOn ? 'on' : shockState(time, h.phaseMs);
       const x = h.x * TILE_SIZE;
       const y = h.y * TILE_SIZE;
       const w = h.w * TILE_SIZE;
@@ -1943,6 +2178,7 @@ export class GameScene extends Phaser.Scene implements EnemyWorld, BossHost {
     audio.setIntensity(0);
     if (extracted) this.extractionMoment();
     else this.deathMoment();
+    if (this.training) return this.endTraining(extracted, reason);
 
     const durationMs = this.time.now - this.runStartedAt;
     const before = loadSave();
@@ -1962,7 +2198,7 @@ export class GameScene extends Phaser.Scene implements EnemyWorld, BossHost {
     after = recordRun(after, {
       at: new Date().toISOString(),
       ship: this.run.ship,
-      mode: this.run.mode,
+      mode: this.run.mode as Exclude<typeof this.run.mode, 'tutorial'>,
       seed: this.run.seed,
       character: this.stats.character.id,
       extracted,

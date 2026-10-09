@@ -55,6 +55,8 @@ describe('clan rules', () => {
     const c = parseMyClan({ id: '7', name: 'Rust', tag: 'RUST', open: false, inviteCode: 'RUST-7KQ2', isLeader: true, weekSalvage: '300', weekRank: '2', lastWeekRank: null, members: [{ callsign: 'NOVA', leader: true, you: true, weekSalvage: '300', allSalvage: '900', runs: 4 }] });
     expect(c).toMatchObject({ id: 7, weekSalvage: 300, weekRank: 2, lastWeekRank: null, members: [{ callsign: 'NOVA', allSalvage: 900 }] });
     expect(parseMyClan(null)).toBeNull();
+    expect(parseMyClan([])).toBeNull();
+    expect(parseMyClan({})).toBeNull();
   });
 });
 

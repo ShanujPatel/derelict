@@ -105,8 +105,10 @@ export interface ClanRunSummary {
 
 /** Turns get_my_clan's JSON into a MyClan (numbers can arrive as strings). */
 export function parseMyClan(raw: unknown): MyClan | null {
-  if (!raw || typeof raw !== 'object') return null;
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return null;
   const r = raw as Record<string, unknown>;
+  // Anything without a clan tag isn't a clan (e.g. an empty reply).
+  if (typeof r.tag !== 'string' || !r.tag) return null;
   const num = (v: unknown) => (v === null || v === undefined ? null : Number(v));
   const members = Array.isArray(r.members) ? (r.members as Record<string, unknown>[]) : [];
   return {

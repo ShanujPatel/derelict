@@ -16,6 +16,7 @@ import { CHAPTERS, CODEX, MINING_UNLOCK_EXTRACTIONS, chapterProgress } from '../
 import { dailySeed, dailyShip } from '../core/seed';
 import { dayFromDailySeed, formatDuration, type BoardEntry } from '../core/leaderboard';
 import { leaderboard } from '../net/leaderboard';
+import { TRAINING_REWARD } from '../core/training';
 import { CLAN, checkClanName, checkClanTag, clanGoal, type ClanBoardRow, type MyClan, type OpenClan } from '../core/clans';
 import { ACHIEVEMENTS as ALL_ACHIEVEMENTS } from '../core/achievements';
 import { BOARDS, boardDef, fastestFirst, formatCell, type BoardGroup, type BoardId, type HallRow } from '../core/hallOfFame';
@@ -33,6 +34,7 @@ import {
   canBoard,
   claimClanGoal,
   setClanCache,
+  skipTraining,
   computeRunStats,
   defaultSave,
   exportSave,
@@ -86,6 +88,8 @@ const TABS: { id: Tab; label: string }[] = [
 export interface HubCallbacks {
   onLaunch: (daily: boolean, boss?: BossId) => void;
   onWeekly?: () => void;
+  /** Starts the training run. */
+  onTraining?: () => void;
   onSave: (save: SaveData) => void;
   onReset: () => void;
   onSound?: (name: SfxName) => void;
@@ -304,6 +308,11 @@ export class HubView {
       case 'refresh-board':
         this.board.at = 0;
         return this.render();
+      case 'training':
+        return this.callbacks.onTraining?.();
+      case 'skip-training':
+        this.update(skipTraining(this.save));
+        return this.toast('You can play training any time from LOG → Field manual');
       case 'clan-open-choice':
         this.clanForm.open = d.open === 'true';
         return this.render();
@@ -580,6 +589,7 @@ export class HubView {
         .join('');
 
     return `
+      ${this.trainingCard()}
       ${this.nameSection()}
       ${this.clanSection()}
       <section class="card preview">
@@ -598,6 +608,19 @@ export class HubView {
       <section class="hub-section"><h3>Crew</h3><div class="choices">${characters}</div></section>
       <section class="hub-section"><h3>${c.id === 'robot' ? 'Chassis' : 'Suit'}</h3><div class="swatches">${swatches('body')}</div></section>
       <section class="hub-section"><h3>${c.id === 'robot' ? 'Optics' : 'Visor'}</h3><div class="swatches">${swatches('accent')}</div></section>`;
+  }
+
+  /** For new players: an invitation to the training run, until they've played it or waved it off. */
+  private trainingCard(): string {
+    if (this.save.tutorial !== 'new') return '';
+    return `<section class="card training-card">
+      <div class="tc-head"><b>NEW TO DERELICT?</b><span>3 MINUTES</span></div>
+      <p>Take the training run: a small guided ship that teaches you to move, grab salvage and air, shoot, roll, cut through walls, blow things up and get out alive. +${TRAINING_REWARD} salvage when you finish.</p>
+      <div class="btn-row">
+        <button class="btn" data-action="training">START TRAINING ▸</button>
+        <button class="btn ghost" data-action="skip-training">NOT NOW</button>
+      </div>
+    </section>`;
   }
 
   private nameSection(): string {
@@ -1408,6 +1431,12 @@ export class HubView {
       ${this.bestsSection()}
       ${this.historySection()}
       ${this.achievementsSection()}
+      <section class="hub-section"><h3>Training</h3>
+        <p class="hub-note">A short guided ship that walks you through moving, salvage, oxygen, shooting, rolling, the torch, fuel drums, the scanner and extracting.${
+          this.save.tutorial === 'done' ? ' You have finished it.' : ` Finish it once for +${TRAINING_REWARD} salvage.`
+        }</p>
+        <div class="btn-row"><button class="btn ghost" data-action="training">PLAY TRAINING ▸</button></div>
+      </section>
       ${manualSection()}
       ${this.codexSection()}
       ${this.settingsSection()}

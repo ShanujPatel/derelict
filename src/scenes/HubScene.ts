@@ -34,6 +34,7 @@ export class HubScene extends Phaser.Scene {
       onSave: storeSave,
       onReset: clearSave,
       onLaunch: (daily, boss) => this.launch(daily, boss),
+      onTraining: () => this.launchRun({ seed: 'training', mode: 'tutorial', ship: 'freighter' }),
       onWeekly: () => this.launchRun({ seed: weeklySeed(new Date()), mode: 'weekly', ship: weeklySetup(weeklySeed(new Date())).ship }),
       onSound: (name) => audio.play(name),
       onSettings: (settings) => audio.setSettings(settings),

@@ -129,7 +129,7 @@ export class BootScene extends Phaser.Scene {
     // A shared link (?seed= or ?daily) boards that ship straight away; otherwise start in the hub.
     const search = window.location.search;
     const params = new URLSearchParams(search);
-    if (['seed', 'daily', 'boss', 'weekly'].some((k) => params.has(k))) this.scene.start('Game', resolveSeed(search));
+    if (['seed', 'daily', 'boss', 'weekly', 'tutorial'].some((k) => params.has(k))) this.scene.start('Game', resolveSeed(search));
     else this.scene.start('Hub');
   }
 

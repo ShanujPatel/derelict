@@ -92,6 +92,11 @@ export function updateEnemy(e: Sprite, world: EnemyWorld, time: number) {
     return;
   }
 
+  // Training drones hold still: target practice.
+  if (e.getData('pinned')) {
+    e.setVelocity(0, 0);
+    return;
+  }
   if (kind === 'turret') return updateTurret(e, world, time, stats);
   if (kind === 'sweeper') return updateSweeper(e, world, time, stats);
   // Mimics ignore line of sight while dormant: they only wake when you're right next to them.

@@ -1760,3 +1760,37 @@
   font-size: 9px;
   letter-spacing: 0.12em;
 }
+
+/* ---------------------------------------------------------------- training invitation (v1.2) */
+.training-card {
+  box-shadow: inset 0 0 0 1px var(--green);
+  background:
+    radial-gradient(ellipse at 100% 0%, rgba(61, 255, 154, 0.14), transparent 60%),
+    var(--panel);
+}
+
+.training-card .tc-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  letter-spacing: 0.14em;
+}
+
+.training-card .tc-head b {
+  font-weight: 400;
+  color: var(--green);
+}
+
+.training-card .tc-head span {
+  font-size: 10px;
+  color: var(--muted);
+}
+
+.training-card p {
+  margin: 8px 0 0;
+  font-size: 13px;
+}
+
+.training-card .btn:not(.ghost) {
+  background: var(--green);
+}

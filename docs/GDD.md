@@ -187,6 +187,12 @@ Opt-in runs from the DAILY tab (unlocked after 3 extractions; the Bloom Mother a
 - Limits: 15 members, 24 h rejoin wait after leaving (not after a kick), leader hand-over on leave, empty clans deleted.
 - UI: CREW clan card (join by code, browse open clans, found one with a required open/invite-only choice; or your clan with leader tools); RANKS Salvagers/Clans switch; tags on boards via `get_clan_tags`.
 
+## 9h. Training run (v1.2)
+
+- Mode `tutorial` (`?tutorial`, seed `training`): `generateTraining()` builds a fixed 74×16 deck of seven 8-tall rooms in a row. Sealed doors are wall tiles opened with `cutTile` when their step completes; the door between rooms 5 and 6 is weak wall (step 6). Room 5 has an always-live 2×8 shock floor (narrower than a roll).
+- Steps: move (reach marker) → salvage (3 crates) → supplies (air drops to 40%, HP to 55%; take the O₂ and medkit) → shoot (2 pinned drones, 2 HP) → roll (cross the live floor) → torch (cut the cracked wall; one cut opens both tiles) → drum (3 pinned drones by a drum) → scanner (open the map) → extract.
+- Calm condition, no rivals, bounty, lift, data log or tips; tool forced to the torch. Ending skips the normal results: history, achievements, boards and clans aren't touched. `completeTraining` pays 100 once; `save.tutorial` is `new`, `done` or `skipped`.
+
 ## 10. Art and audio
 
 - **Pixel art**, 16×16 tiles, limited palette per ship type (cold blues for freighters, sickly greens for research vessels).
@@ -240,6 +246,7 @@ Each version is a tagged GitHub release with notes.
 | **v0.9** ✅ | All-time hall of fame: salvage, records, boss times, kills by hostile type |
 | **v1.0** ✅ | The Saw-Tooth: mining haulers, the Hollow Captain, codex chapter 3, weekly board, ghosts, seed explorer, installable offline app, faster loading |
 | **v1.1** ✅ | Clans: open or invite-only, 15 members, weekly and all-time clan boards, goals, tags |
+| **v1.2** ✅ | Training run: nine guided steps in a handcrafted ship, hub invitation for new players |
 | **Later** | Codex chapter 4 (the survey ship Caldera); ghost races against friends; more bosses |
 
 ## 13. Open questions

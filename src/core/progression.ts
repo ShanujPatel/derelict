@@ -59,6 +59,8 @@ export interface SaveData {
   clan: { tag: string; name: string } | null;
   /** The week whose clan-goal bonus you've already been paid. */
   clanGoalWeek: string;
+  /** Training run: not played yet, finished (reward paid), or waved off from the hub. */
+  tutorial: 'new' | 'done' | 'skipped';
   /** Consecutive days with a Daily Derelict extraction. */
   streak: { lastDay: string; count: number; best: number };
   settings: Settings;
@@ -173,6 +175,7 @@ export function defaultSave(): SaveData {
     weekly: { week: '', best: 0 },
     clan: null,
     clanGoalWeek: '',
+    tutorial: 'new',
     streak: { lastDay: '', count: 0, best: 0 },
     settings: { ...DEFAULT_SETTINGS },
     cosmetics: [],
@@ -632,6 +635,13 @@ export function sanitizeSave(raw: unknown): SaveData {
         ? { tag: raw.clan.tag, name: raw.clan.name.slice(0, 20) }
         : null,
     clanGoalWeek: typeof raw.clanGoalWeek === 'string' && /^\d{4}-W\d{2}$/.test(raw.clanGoalWeek) ? raw.clanGoalWeek : '',
+    // Saves from before training existed: experienced players aren't nagged with it.
+    tutorial:
+      raw.tutorial === 'done' || raw.tutorial === 'skipped' || raw.tutorial === 'new'
+        ? raw.tutorial
+        : isObj(raw.stats) && num(raw.stats.runs) >= 3
+          ? 'skipped'
+          : 'new',
     settings: sanitizeSettings(raw.settings),
     credits: num(raw.credits),
     characters,
@@ -732,4 +742,17 @@ export function claimClanGoal(save: SaveData, week: string, bonus: number): { sa
   next.clanGoalWeek = week;
   next.credits += bonus;
   return { save: next, paid: true };
+}
+
+/** Finishing training: pays the reward the first time only. */
+export function completeTraining(save: SaveData, reward: number): { save: SaveData; paid: boolean } {
+  if (save.tutorial === 'done') return { save, paid: false };
+  const next = clone(save);
+  next.tutorial = 'done';
+  next.credits += reward;
+  return { save: next, paid: true };
+}
+
+export function skipTraining(save: SaveData): SaveData {
+  return save.tutorial === 'new' ? { ...clone(save), tutorial: 'skipped' } : save;
 }
