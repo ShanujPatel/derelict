@@ -508,13 +508,6 @@
   margin-left: 6px;
 }
 
-.daily-card .btn.launch {
-  width: 100%;
-  min-height: 44px;
-  font-size: 13px;
-  letter-spacing: 0.16em;
-}
-
 .board {
   list-style: none;
   margin: 0;
@@ -656,7 +649,7 @@
 
 .hub-launch {
   display: grid;
-  grid-template-columns: 1fr auto;
+  grid-template-columns: 1.25fr 1fr;
   gap: 10px;
   padding: 12px 16px 16px;
   border-top: 1px solid var(--line);
@@ -700,6 +693,125 @@
 
 .btn.daily {
   min-height: 52px;
+}
+
+/* ---------------------------------------------------------------- daily mission theme */
+
+/* Each daily ship type has its own look: hazard stripes for freighters, Bloom spores for research vessels. */
+.theme-freighter {
+  --theme: #ffb03b;
+  --theme-ink: #1a1206;
+  --theme-bg:
+    repeating-linear-gradient(-45deg, rgba(255, 176, 59, 0.16) 0 7px, transparent 7px 14px),
+    linear-gradient(180deg, #21180a, #120d06);
+}
+
+.theme-research {
+  --theme: #4fd8d0;
+  --theme-ink: #051413;
+  --theme-bg:
+    radial-gradient(circle at 92% 28%, rgba(190, 110, 255, 0.35) 0 5px, transparent 6px),
+    radial-gradient(circle at 84% 78%, rgba(190, 110, 255, 0.28) 0 4px, transparent 5px),
+    radial-gradient(circle at 96% 62%, rgba(79, 216, 208, 0.3) 0 3px, transparent 4px),
+    radial-gradient(ellipse at 50% 120%, rgba(79, 216, 208, 0.32), transparent 70%),
+    linear-gradient(180deg, #0b1c18, #07110f);
+}
+
+.btn.daily {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  justify-content: center;
+  gap: 2px;
+  min-height: 60px;
+  padding: 7px 12px;
+  text-align: left;
+  color: var(--theme);
+  background: var(--theme-bg);
+  box-shadow: inset 0 0 0 1px var(--theme);
+}
+
+.btn.daily:hover {
+  box-shadow: inset 0 0 0 2px var(--theme), inset 0 0 18px color-mix(in srgb, var(--theme) 35%, transparent);
+}
+
+.d-top {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 10px;
+  letter-spacing: 0.16em;
+  opacity: 0.85;
+}
+
+.d-dot {
+  width: 6px;
+  height: 6px;
+  background: var(--theme);
+}
+
+.played .d-dot {
+  background: transparent;
+  box-shadow: inset 0 0 0 1px var(--theme);
+}
+
+.d-ship {
+  font-size: 15px;
+  letter-spacing: 0.14em;
+  white-space: nowrap;
+}
+
+.d-name {
+  font-size: 10px;
+  letter-spacing: 0.12em;
+  color: var(--text);
+  opacity: 0.75;
+  white-space: nowrap;
+}
+
+/* Not played yet today: the button breathes to draw the eye. */
+.btn.daily.fresh {
+  animation: daily-pulse 2.4s ease-in-out infinite;
+}
+
+.btn.daily.fresh .d-dot {
+  animation: daily-blink 1.2s steps(2, jump-none) infinite;
+}
+
+@keyframes daily-pulse {
+  0%, 100% { box-shadow: inset 0 0 0 1px var(--theme); }
+  50% { box-shadow: inset 0 0 0 2px var(--theme), inset 0 0 22px color-mix(in srgb, var(--theme) 40%, transparent); }
+}
+
+@keyframes daily-blink {
+  50% { opacity: 0.15; }
+}
+
+.daily-card.theme-freighter,
+.daily-card.theme-research {
+  background: var(--theme-bg);
+  box-shadow: inset 0 0 0 1px var(--theme);
+  border-color: transparent;
+}
+
+.daily-card .daily-head b {
+  color: var(--theme, var(--cyan));
+}
+
+.daily-vessel {
+  font-size: 20px;
+  letter-spacing: 0.18em;
+  color: var(--theme, var(--text));
+  margin-bottom: 6px;
+}
+
+.btn.daily-play {
+  width: 100%;
+  min-height: 44px;
+  font-size: 13px;
+  letter-spacing: 0.16em;
+  color: var(--theme-ink);
+  background: var(--theme);
 }
 
 /* ---------------------------------------------------------------- toast */
@@ -757,7 +869,7 @@
   }
   .hub-launch {
     padding: 8px 16px 10px;
-    grid-template-columns: 1.2fr 1fr auto;
+    grid-template-columns: 1.1fr 1fr 1fr;
   }
   .dest {
     grid-column: auto;
@@ -766,9 +878,15 @@
     min-height: 42px;
     font-size: 11px;
   }
-  .btn.launch,
+  .btn.launch {
+    min-height: 42px;
+  }
   .btn.daily {
     min-height: 42px;
+    padding-block: 3px;
+  }
+  .d-name {
+    display: none;
   }
   .preview canvas {
     width: 72px;
@@ -779,6 +897,10 @@
 @media (prefers-reduced-motion: reduce) {
   .hub-toast {
     transition: none;
+  }
+  .btn.daily.fresh,
+  .btn.daily.fresh .d-dot {
+    animation: none;
   }
 }
 

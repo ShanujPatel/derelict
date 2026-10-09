@@ -1,6 +1,12 @@
 # Changelog
 
-## [0.5.1] — Unreleased
+## [0.5.2] — Unreleased
+
+### Changed
+- The DAILY button is now themed by today's mission: hazard-striped amber for a freighter, teal with Bloom spores for a research vessel. It shows the ship type, the wreck's name and NEW (pulsing) or your best today. The pulse respects reduced-motion settings.
+- Each daily wreck has a name from its seed, e.g. *CSV BRIGAND* or *RV SOMERVILLE*, the same for everyone. The DAILY tab's card uses the same theme and says what's aboard.
+
+## [0.5.1] — 2026-10-09
 
 ### Added
 - Name your salvager at the top of the **Crew** tab. New players get a random sci-fi name (*NYX HARROW*, *COLD COMET*, *VOSS-27*); the ⚄ button rolls another. Old `SALVAGER-0000` placeholders are replaced automatically.

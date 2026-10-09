@@ -1,4 +1,7 @@
 import { CALLSIGN_PATTERN } from './leaderboard';
+import { createRng } from './rng';
+import { hashString } from './seed';
+import type { ShipType } from './types';
 
 /**
  * Random sci-fi names for new players, e.g. "NYX HARROW", "COLD COMET",
@@ -49,3 +52,15 @@ export const NAME_SPACE = FIRST.length * LAST.length + ADJECTIVE.length * NOUN.l
 
 /** Names from before v0.5.1 ("SALVAGER-0421") were placeholders, not chosen by the player. */
 export const isPlaceholderName = (name: string) => /^SALVAGER-\d{4}$/.test(name);
+
+const VESSELS = {
+  freighter: { prefix: 'CSV', names: ['ATLAS', 'BRIGAND', 'CALLISTO', 'DUSKWARD', 'EMBERLINE', 'GRANITE', 'HARROWGATE', 'IRONSIDE', 'KESTREL', 'LODESTAR', 'MERIDIAN', 'NORTHWIND', 'OBELISK', 'RAMPART', 'STOCKTON', 'TITAN', 'VANGUARD', 'WAYFARER'] },
+  research: { prefix: 'RV', names: ['AURELIA', 'CASSINI', 'DAEDALUS', 'EUROPA', 'HYPATIA', 'KEPLER', 'NOETHER', 'ORPHEUS', 'PANDORA', 'SELENE', 'THEIA', 'VESALIUS', 'ZENITH', 'MERIAN', 'SOMERVILLE', 'FARADAY'] },
+} as const;
+
+/** The wreck's name for a seed, e.g. "CSV IRONSIDE" or "RV PANDORA". Same seed, same name. */
+export function vesselName(seed: string, ship: ShipType): string {
+  const { prefix, names } = VESSELS[ship];
+  const rng = createRng(hashString(`vessel:${seed}`));
+  return `${prefix} ${names[rng.int(0, names.length - 1)]}`;
+}

@@ -52,7 +52,7 @@ Progress saves in your browser. Use **Log → Copy save code** to move it to ano
 
 <img src="docs/screenshot-hub.png" alt="Hub screen" width="480">
 
-**Daily Derelict:** one ship a day, the same for everyone. Extract to post your salvage to the online leaderboard (DAILY tab); only your best run counts. You start with a random sci-fi name like *NYX HARROW* or *COLD COMET*; change it or roll a new one at the top of the **Crew** tab. Names are unique across all players. Setting up your own board takes about 10 minutes: see [docs/LEADERBOARD.md](docs/LEADERBOARD.md).
+**Daily Derelict:** one named wreck a day, the same for everyone; the DAILY button shows today's ship. Extract to post your salvage to the online leaderboard (DAILY tab); only your best run counts. You start with a random sci-fi name like *NYX HARROW* or *COLD COMET*; change it or roll a new one at the top of the **Crew** tab. Names are unique across all players. Setting up your own board takes about 10 minutes: see [docs/LEADERBOARD.md](docs/LEADERBOARD.md).
 
 **Seeds:** every ship comes from a seed shown in the top-right corner. Share a ship with `?seed=YOURSEED` (add `&ship=research` for a research vessel), or play today's shared ship with `?daily`.
 

@@ -15,6 +15,7 @@ import { CHAPTERS, CODEX, chapterProgress } from '../core/codex';
 import { dailySeed, dailyShip } from '../core/seed';
 import { dayFromDailySeed, formatDuration, type BoardEntry } from '../core/leaderboard';
 import { leaderboard } from '../net/leaderboard';
+import { vesselName } from '../core/names';
 import { chooseName, ensureName, rollName, type NameResult } from '../net/names';
 import type { ShipType } from '../core/types';
 import {
@@ -332,10 +333,29 @@ export class HubView {
     };
     this.root.querySelector('[data-dest]')!.innerHTML =
       option('freighter', 'FREIGHTER') + option('research', 'RESEARCH');
-    const todays = dailyShip(dailySeed(new Date())) === 'research' ? 'research vessel' : 'freighter';
+    const mission = this.dailyMission();
     const daily = this.root.querySelector<HTMLElement>('.hub-launch [data-action="daily"]')!;
-    daily.textContent = 'DAILY';
-    daily.title = `Today's shared ship: a ${todays}`;
+    daily.className = `btn daily theme-${mission.ship} ${mission.best === null ? 'fresh' : 'played'}`;
+    daily.innerHTML = `
+      <span class="d-top"><i class="d-dot"></i>DAILY · ${mission.best === null ? 'NEW' : `BEST ${mission.best}`}</span>
+      <span class="d-ship">${mission.icon} ${mission.label} ▸</span>
+      <span class="d-name">${mission.vessel}</span>`;
+    daily.title = `Today's shared ship: ${mission.vessel}, a ${mission.label.toLowerCase()}. ${mission.threat}`;
+  }
+
+  /** Today's shared ship, for the themed DAILY button and the DAILY tab. */
+  private dailyMission() {
+    const seed = dailySeed(new Date());
+    const ship = dailyShip(seed);
+    const day = this.today();
+    return {
+      ship,
+      vessel: vesselName(seed, ship),
+      label: ship === 'research' ? 'RESEARCH' : 'FREIGHTER',
+      icon: ship === 'research' ? '☣' : '⛭',
+      threat: ship === 'research' ? 'Overrun by the Bloom.' : 'Guarded by drones and turrets.',
+      best: this.save.daily.day === day ? this.save.daily.best : null,
+    };
   }
 
   private priceTag(item: ShopItem): { label: string; cls: string } {
@@ -529,7 +549,8 @@ export class HubView {
   private dailyTab(): string {
     this.loadBoard();
     const day = this.today();
-    const ship = dailyShip(dailySeed(new Date())) === 'research' ? 'Research vessel' : 'Freighter';
+    const mission = this.dailyMission();
+    const ship = mission.ship === 'research' ? 'Research vessel' : 'Freighter';
     const date = new Date(`${day}T12:00:00Z`).toLocaleDateString('en-GB', { weekday: 'short', day: 'numeric', month: 'short' });
     const best = this.save.daily.day === day ? this.save.daily.best : null;
 
@@ -559,11 +580,12 @@ export class HubView {
     }
 
     return `
-      <section class="card daily-card">
-        <div class="daily-head"><span>${date.toUpperCase()}</span><b>${ship.toUpperCase()}</b></div>
-        <p class="hub-note">Same ship for everyone today. Extract to post your salvage; only your best run counts. Ties go to the faster run.</p>
+      <section class="card daily-card theme-${mission.ship}">
+        <div class="daily-head"><span>${date.toUpperCase()}</span><b>${mission.icon} ${ship.toUpperCase()}</b></div>
+        <div class="daily-vessel">${mission.vessel}</div>
+        <p class="hub-note">${mission.threat} Same ship for everyone today. Extract to post your salvage; only your best run counts. Ties go to the faster run.</p>
         <div class="daily-best">Your best today <b>${best ?? '—'}</b></div>
-        <div class="btn-row"><button class="btn launch" data-action="daily">PLAY TODAY'S DERELICT ▸</button></div>
+        <div class="btn-row"><button class="btn daily-play theme-${mission.ship}" data-action="daily">BOARD ${mission.vessel} ▸</button></div>
       </section>
       <section class="hub-section"><h3>Top salvagers · ${day}</h3>${board}</section>
       <p class="hub-note">Posting as <b>${esc(this.save.callsign)}</b>. Change your name in <button class="text-link" data-tab="crew">CREW</button>. No account needed; your save code carries it to other devices.</p>`;

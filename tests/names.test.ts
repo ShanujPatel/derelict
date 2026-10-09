@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 import { CALLSIGN_PATTERN } from '../src/core/leaderboard';
-import { NAME_SPACE, isPlaceholderName, randomName } from '../src/core/names';
+import { NAME_SPACE, isPlaceholderName, randomName, vesselName } from '../src/core/names';
 import { createRng } from '../src/core/rng';
 import { defaultSave, exportSave, importSave, sanitizeSave, type SaveData } from '../src/core/progression';
 import { createLeaderboardClient } from '../src/net/leaderboard';
@@ -38,6 +38,16 @@ describe('random names', () => {
   it('spots the old SALVAGER-0000 placeholders', () => {
     expect(isPlaceholderName('SALVAGER-0421')).toBe(true);
     expect(isPlaceholderName('SALVAGER JOE')).toBe(false);
+  });
+});
+
+describe('daily vessel names', () => {
+  it('are fixed per seed and match the ship type', () => {
+    expect(vesselName('daily-2026-10-09', 'research')).toBe(vesselName('daily-2026-10-09', 'research'));
+    expect(vesselName('daily-2026-10-11', 'freighter')).toMatch(/^CSV [A-Z]+$/);
+    expect(vesselName('daily-2026-10-09', 'research')).toMatch(/^RV [A-Z]+$/);
+    const week = new Set(Array.from({ length: 14 }, (_, i) => vesselName(`daily-2026-10-${10 + i}`, 'freighter')));
+    expect(week.size).toBeGreaterThan(6);
   });
 });
 
