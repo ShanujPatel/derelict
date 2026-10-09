@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { dailySeed, hashString, randomSeed, resolveSeed } from '../src/core/seed';
+import { dailySeed, dailyShip, hashString, randomSeed, resolveSeed, seedQuery } from '../src/core/seed';
 
 describe('hashString', () => {
   it('is stable', () => {
@@ -35,19 +35,48 @@ describe('resolveSeed', () => {
   const fixed = () => 0;
 
   it('handles ?daily', () => {
-    expect(resolveSeed('?daily', now, fixed)).toEqual({ seed: 'daily-2026-10-08', mode: 'daily' });
+    expect(resolveSeed('?daily', now, fixed)).toEqual({
+      seed: 'daily-2026-10-08',
+      mode: 'daily',
+      ship: dailyShip('daily-2026-10-08'),
+    });
   });
 
   it('handles ?seed=', () => {
-    expect(resolveSeed('?seed=HULK42', now, fixed)).toEqual({ seed: 'HULK42', mode: 'custom' });
+    expect(resolveSeed('?seed=HULK42', now, fixed)).toEqual({ seed: 'HULK42', mode: 'custom', ship: 'freighter' });
+    expect(resolveSeed('?seed=HULK42&ship=research', now, fixed).ship).toBe('research');
+    expect(resolveSeed('?seed=HULK42&ship=castle', now, fixed).ship).toBe('freighter');
   });
 
   it('falls back to a random seed', () => {
-    expect(resolveSeed('', now, fixed)).toEqual({ seed: 'AAAAAA', mode: 'random' });
+    expect(resolveSeed('', now, fixed)).toEqual({ seed: 'AAAAAA', mode: 'random', ship: 'freighter' });
     expect(resolveSeed('?seed=', now, fixed).mode).toBe('random');
   });
 
   it('caps custom seed length', () => {
     expect(resolveSeed(`?seed=${'x'.repeat(100)}`, now, fixed).seed).toHaveLength(32);
+  });
+});
+
+describe('dailyShip', () => {
+  it('alternates ship types across days', () => {
+    const ships = new Set(
+      Array.from({ length: 14 }, (_, i) => dailyShip(dailySeed(new Date(Date.UTC(2026, 9, 1 + i))))),
+    );
+    expect(ships).toEqual(new Set(['freighter', 'research']));
+  });
+});
+
+describe('seedQuery', () => {
+  it('round-trips through resolveSeed', () => {
+    for (const run of [
+      { seed: 'ABC', mode: 'custom' as const, ship: 'freighter' as const },
+      { seed: 'XYZ', mode: 'random' as const, ship: 'research' as const },
+    ]) {
+      const back = resolveSeed(seedQuery(run));
+      expect(back.seed).toBe(run.seed);
+      expect(back.ship).toBe(run.ship);
+    }
+    expect(seedQuery({ seed: 'daily-2026-10-09', mode: 'daily', ship: 'research' })).toBe('?daily');
   });
 });

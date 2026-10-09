@@ -5,6 +5,7 @@ import type { WeaponId } from './weapons';
 export type CharacterId = 'salvager' | 'robot';
 export type StatId = 'health' | 'capacity' | 'speed';
 export type PerkId = 'scavenger' | 'cold-cutter' | 'scrapper' | 'second-wind';
+export type ToolId = 'torch' | 'hacker';
 
 export interface CharacterDef {
   id: CharacterId;
@@ -18,6 +19,8 @@ export interface CharacterDef {
   baseCapacity: number;
   drainPerSecond: number;
   speedMultiplier: number;
+  /** Seconds to finish a hack. */
+  hackSeconds: number;
 }
 
 export const CHARACTERS: Record<CharacterId, CharacterDef> = {
@@ -32,11 +35,12 @@ export const CHARACTERS: Record<CharacterId, CharacterDef> = {
     baseCapacity: 100,
     drainPerSecond: 0.8,
     speedMultiplier: 1,
+    hackSeconds: 1.4,
   },
   robot: {
     id: 'robot',
     name: 'Robot',
-    blurb: 'Armoured salvage unit. Shrugs off hits, slower, runs on battery.',
+    blurb: 'Armoured salvage unit. Shrugs off hits, hacks twice as fast, slower, runs on battery.',
     cost: 150,
     baseHp: 80,
     armour: 0.3,
@@ -44,6 +48,7 @@ export const CHARACTERS: Record<CharacterId, CharacterDef> = {
     baseCapacity: 130,
     drainPerSecond: 0.8,
     speedMultiplier: 0.92,
+    hackSeconds: 0.7,
   },
 };
 
@@ -98,6 +103,23 @@ export const WEAPON_COSTS: Record<WeaponId, number> = {
   blaster: 0,
   scattergun: 0,
   railgun: 180,
+};
+
+export interface ToolDef {
+  id: ToolId;
+  name: string;
+  blurb: string;
+  cost: number;
+}
+
+export const TOOLS: Record<ToolId, ToolDef> = {
+  torch: { id: 'torch', name: 'Cutting torch', blurb: 'Cuts through cracked walls to make shortcuts.', cost: 0 },
+  hacker: {
+    id: 'hacker',
+    name: 'Hacking tool',
+    blurb: 'Turns turrets to your side and opens locked caches. Stand close and hold still.',
+    cost: 160,
+  },
 };
 
 export interface ColourOption {

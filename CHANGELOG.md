@@ -1,6 +1,23 @@
 # Changelog
 
-## [0.2.0] — Unreleased
+## [0.3.0] — Unreleased
+
+### Added
+- Research vessels: a second ship type with teal lab tiles, Bloom growth on the floors and darker lighting.
+- Alien enemies: crawlers (fast swarmers), spitters (lob acid, back away when you get close) and egg sacs (keep hatching crawlers while you're in sight).
+- Wall turrets on freighters, with a rotating barrel.
+- Hacking tool (160 salvage): hack a turret to make it fight for you, or open a locked cache for 30–60 salvage. Robots hack twice as fast.
+- Locked caches on every ship.
+- Codex chapter 1, *The Halcyon Contract*: eight crew logs, one hidden deep in each ship and read in the hub. Logs are kept even if you die. The third log unlocks research vessels, and finishing the chapter pays 150 salvage.
+- Destination picker in the hub. The Daily Derelict alternates ship type by date.
+- Shareable research-vessel links: `?seed=XYZ&ship=research`.
+
+### Changed
+- Drones, turrets and aliens now share one enemy system (`src/scenes/enemies.ts`).
+- The tool slot is chosen in the Loadout, and the touch button shows TORCH or HACK.
+- The "Drones down" stat is now "Hostiles down".
+
+## [0.2.0] — 2026-10-08
 
 ### Added
 - Hub between runs, with Crew, Loadout, Upgrades and Log screens. Built as a responsive HTML overlay that works on phones.

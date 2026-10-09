@@ -1,5 +1,5 @@
 import Phaser from 'phaser';
-import { dailySeed, randomSeed, type ResolvedSeed } from '../core/seed';
+import { dailySeed, dailyShip, randomSeed, seedQuery, type ResolvedSeed } from '../core/seed';
 import { HubView } from '../hub/HubView';
 import { clearSave, loadSave, storeSave } from '../storage';
 
@@ -43,11 +43,12 @@ export class HubScene extends Phaser.Scene {
   }
 
   private launch(daily: boolean) {
+    const today = dailySeed(new Date());
     const run: ResolvedSeed = daily
-      ? { seed: dailySeed(new Date()), mode: 'daily' }
-      : { seed: randomSeed(), mode: 'random' };
+      ? { seed: today, mode: 'daily', ship: dailyShip(today) }
+      : { seed: randomSeed(), mode: 'random', ship: loadSave().loadout.destination };
     try {
-      window.history.replaceState(null, '', daily ? '?daily' : `?seed=${run.seed}`);
+      window.history.replaceState(null, '', seedQuery(run));
     } catch {
       /* ignore */
     }

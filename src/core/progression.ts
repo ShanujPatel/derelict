@@ -3,6 +3,7 @@ import {
   COSMETICS,
   PERKS,
   STATS,
+  TOOLS,
   WEAPON_COSTS,
   cosmeticKey,
   findCosmetic,
@@ -11,7 +12,11 @@ import {
   type PerkDef,
   type PerkId,
   type StatId,
+  type ToolDef,
+  type ToolId,
 } from './catalog';
+import { CHAPTERS, CODEX, chapterProgress, isResearchUnlocked } from './codex';
+import { SHIP_TYPES, type ShipType } from './types';
 import { hashString } from './seed';
 import { WEAPONS, type WeaponDef, type WeaponId } from './weapons';
 
@@ -25,6 +30,11 @@ export interface SaveData {
   characters: CharacterId[];
   weapons: WeaponId[];
   perks: PerkId[];
+  tools: ToolId[];
+  /** Crew log ids found, in the order they were found. */
+  codex: string[];
+  /** Chapter rewards already paid out, e.g. 'chapter-1'. */
+  rewards: string[];
   /** Bought cosmetics, as cosmeticKey() strings. Free options are always owned. */
   cosmetics: string[];
   upgrades: Record<StatId, number>;
@@ -32,6 +42,8 @@ export interface SaveData {
     character: CharacterId;
     guns: [WeaponId, WeaponId];
     perk: PerkId | null;
+    tool: ToolId;
+    destination: ShipType;
     looks: Record<CharacterId, { body: string; accent: string }>;
   };
   stats: {
@@ -48,6 +60,7 @@ export type ShopItem =
   | { kind: 'stat'; id: StatId }
   | { kind: 'weapon'; id: WeaponId }
   | { kind: 'perk'; id: PerkId }
+  | { kind: 'tool'; id: ToolId }
   | { kind: 'cosmetic'; character: CharacterId; slot: 'body' | 'accent'; id: string };
 
 export type PurchaseResult = { ok: true; save: SaveData } | { ok: false; reason: string };
@@ -59,12 +72,17 @@ export function defaultSave(): SaveData {
     characters: ['salvager'],
     weapons: ['blaster', 'scattergun'],
     perks: [],
+    tools: ['torch'],
+    codex: [],
+    rewards: [],
     cosmetics: [],
     upgrades: { health: 0, capacity: 0, speed: 0 },
     loadout: {
       character: 'salvager',
       guns: ['blaster', 'scattergun'],
       perk: null,
+      tool: 'torch',
+      destination: 'freighter',
       looks: {
         salvager: { body: 'orange', accent: 'cyan' },
         robot: { body: 'steel', accent: 'cyan' },
@@ -86,6 +104,8 @@ export function owns(save: SaveData, item: ShopItem): boolean {
       return save.weapons.includes(item.id);
     case 'perk':
       return save.perks.includes(item.id);
+    case 'tool':
+      return save.tools.includes(item.id);
     case 'stat':
       return save.upgrades[item.id] >= STATS[item.id].costs.length;
     case 'cosmetic':
@@ -106,6 +126,8 @@ export function priceOf(save: SaveData, item: ShopItem): number | null {
       return WEAPON_COSTS[item.id] ?? null;
     case 'perk':
       return PERKS[item.id]?.cost ?? null;
+    case 'tool':
+      return TOOLS[item.id]?.cost ?? null;
     case 'stat':
       return STATS[item.id].costs[save.upgrades[item.id]] ?? null;
     case 'cosmetic': {
@@ -133,6 +155,10 @@ export function purchase(save: SaveData, item: ShopItem): PurchaseResult {
     case 'perk':
       next.perks.push(item.id);
       if (!next.loadout.perk) next.loadout.perk = item.id;
+      break;
+    case 'tool':
+      next.tools.push(item.id);
+      next.loadout.tool = item.id;
       break;
     case 'stat':
       next.upgrades[item.id] += 1;
@@ -171,6 +197,25 @@ export function setPerk(save: SaveData, id: PerkId | null): SaveData {
   return next;
 }
 
+export function setTool(save: SaveData, id: ToolId): SaveData {
+  if (!save.tools.includes(id)) return save;
+  const next = clone(save);
+  next.loadout.tool = id;
+  return next;
+}
+
+/** Research vessels can only be chosen once their coordinates have been found in the codex. */
+export function canBoard(save: SaveData, ship: ShipType): boolean {
+  return ship === 'freighter' || isResearchUnlocked(save.codex);
+}
+
+export function setDestination(save: SaveData, ship: ShipType): SaveData {
+  if (!canBoard(save, ship)) return save;
+  const next = clone(save);
+  next.loadout.destination = ship;
+  return next;
+}
+
 export function setLook(save: SaveData, character: CharacterId, slot: 'body' | 'accent', id: string): SaveData {
   if (!owns(save, { kind: 'cosmetic', character, slot, id })) return save;
   const next = clone(save);
@@ -183,13 +228,26 @@ export function setLook(save: SaveData, character: CharacterId, slot: 'body' | '
 export interface RunResult {
   extracted: boolean;
   salvage: number;
+  /** Hostiles destroyed (kept as dronesDestroyed in the save for compatibility). */
   dronesDestroyed: number;
+  /** Crew logs picked up. Kept even if the run fails. */
+  logsFound?: string[];
 }
 
 export function applyRunResult(save: SaveData, result: RunResult): SaveData {
   const next = clone(save);
   const banked = result.extracted ? Math.max(0, Math.floor(result.salvage)) : 0;
   next.credits += banked;
+  for (const id of result.logsFound ?? []) {
+    if (CODEX.some((e) => e.id === id) && !next.codex.includes(id)) next.codex.push(id);
+  }
+  for (const chapter of CHAPTERS) {
+    const key = `chapter-${chapter.id}`;
+    if (chapterProgress(next.codex, chapter.id).complete && !next.rewards.includes(key)) {
+      next.rewards.push(key);
+      next.credits += chapter.reward;
+    }
+  }
   next.stats.runs += 1;
   next.stats.dronesDestroyed += Math.max(0, result.dronesDestroyed);
   if (result.extracted) {
@@ -210,6 +268,8 @@ export interface RunStats {
   armour: number;
   guns: WeaponDef[];
   perk: PerkDef | null;
+  tool: ToolDef;
+  hackSeconds: number;
   colours: Record<string, string>;
 }
 
@@ -225,6 +285,8 @@ export function computeRunStats(save: SaveData): RunStats {
     armour: character.armour,
     guns: save.loadout.guns.map((id) => WEAPONS[id]),
     perk: save.loadout.perk ? PERKS[save.loadout.perk] : null,
+    tool: TOOLS[save.loadout.tool],
+    hackSeconds: character.hackSeconds,
     colours: {
       ...findCosmetic(character.id, 'body', look.body).colours,
       ...findCosmetic(character.id, 'accent', look.accent).colours,
@@ -257,6 +319,9 @@ export function sanitizeSave(raw: unknown): SaveData {
     (['body', 'accent'] as const).flatMap((slot) => COSMETICS[c][slot].map((o) => cosmeticKey(c, slot, o.id))),
   );
   const cosmetics = pickIds(raw.cosmetics, validCosmetics, []);
+  const tools = pickIds(raw.tools, Object.keys(TOOLS) as ToolId[], d.tools);
+  const codex = pickIds(raw.codex, CODEX.map((e) => e.id), []);
+  const rewards = pickIds(raw.rewards, CHAPTERS.map((c) => `chapter-${c.id}`), []);
 
   const up = isObj(raw.upgrades) ? raw.upgrades : {};
   const upgrades = {} as Record<StatId, number>;
@@ -264,7 +329,18 @@ export function sanitizeSave(raw: unknown): SaveData {
     upgrades[id] = Math.min(num(up[id]), STATS[id].costs.length);
   }
 
-  const save: SaveData = { ...d, credits: num(raw.credits), characters, weapons, perks, cosmetics, upgrades };
+  const save: SaveData = {
+    ...d,
+    credits: num(raw.credits),
+    characters,
+    weapons,
+    perks,
+    tools,
+    codex,
+    rewards,
+    cosmetics,
+    upgrades,
+  };
 
   const lo = isObj(raw.loadout) ? raw.loadout : {};
   if (characters.includes(lo.character as CharacterId)) save.loadout.character = lo.character as CharacterId;
@@ -273,6 +349,10 @@ export function sanitizeSave(raw: unknown): SaveData {
     if (weapons.includes(a) && weapons.includes(b) && a !== b) save.loadout.guns = [a, b];
   }
   if (perks.includes(lo.perk as PerkId)) save.loadout.perk = lo.perk as PerkId;
+  if (tools.includes(lo.tool as ToolId)) save.loadout.tool = lo.tool as ToolId;
+  if (SHIP_TYPES.includes(lo.destination as ShipType) && canBoard(save, lo.destination as ShipType)) {
+    save.loadout.destination = lo.destination as ShipType;
+  }
   if (isObj(lo.looks)) {
     for (const c of Object.keys(COSMETICS) as CharacterId[]) {
       const look = lo.looks[c];

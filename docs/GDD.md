@@ -56,7 +56,7 @@ Players choose and customise their character before each run.
 
 **How it's told (light mystery):**
 - **Data logs** — short crew logs, AI terminal dumps and audio-log transcripts, found in each wreck.
-- **Codex** — logs collect into a codex across runs, ordered into chapters. Completing a chapter unlocks a new ship type or item.
+- **Codex** — logs collect into a codex across runs, ordered into chapters. Chapter 1 (*The Halcyon Contract*, 8 logs) is in: log 3 reveals the research vessels' coordinates, and completing the chapter pays 150 salvage. One log slot is generated per ship; it's filled with the next unread log for that ship type.
 - **Environmental clues** — scorch marks, sealed labs, salvager graffiti.
 - No cutscenes; the story never blocks gameplay.
 
@@ -157,7 +157,7 @@ Each version is a tagged GitHub release with notes.
 | **v0.1** ✅ | Salvager only; corporate freighter; patrol drones; blaster + scattergun; cutting torch; seeded deck generation; oxygen; extraction; tests; auto-deploy |
 | **v0.1.1** ✅ | Original pixel art pass, lighting, touch controls, portrait/landscape mobile |
 | **v0.2** ✅ | Robot character; customisation; Hub with permanent unlocks; save data |
-| **v0.3** | Research vessel + alien enemies; codex chapter 1; hacking tool |
+| **v0.3** ✅ | Research vessel + alien enemies; turrets; codex chapter 1; hacking tool; locked caches |
 | **v0.4** | Daily Derelict; online leaderboard; rival salvager events; grav tool |
 | **Later** | Bosses; codex chapters 2–3; more ship types; gamepad polish; accessibility options |
 

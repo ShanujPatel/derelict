@@ -43,7 +43,10 @@ export class TouchControls {
   private width = 0;
   private height = 0;
 
-  constructor(private scene: Phaser.Scene) {
+  constructor(
+    private scene: Phaser.Scene,
+    private toolLabel = 'TORCH',
+  ) {
     // Phones report a coarse pointer; show the controls straight away there.
     this.enabled = typeof window !== 'undefined' && window.matchMedia?.('(pointer: coarse)').matches;
     scene.input.addPointer(2);
@@ -74,7 +77,7 @@ export class TouchControls {
     const x = width - 26;
     this.buttons = [
       { id: 'swap', label: 'GUN', x, y: height * 0.5 },
-      { id: 'torch', label: 'TORCH', x, y: height * 0.5 - 40 },
+      { id: 'torch', label: this.toolLabel, x, y: height * 0.5 - 40 },
     ];
     this.labels.forEach((l) => l.destroy());
     this.labels = this.buttons.map((b) =>

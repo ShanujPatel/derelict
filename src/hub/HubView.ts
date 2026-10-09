@@ -5,11 +5,17 @@ import {
   COSMETICS,
   PERKS,
   STATS,
+  TOOLS,
   type CharacterId,
   type PerkId,
   type StatId,
+  type ToolId,
 } from '../core/catalog';
+import { CHAPTERS, CODEX, chapterProgress } from '../core/codex';
+import { dailySeed, dailyShip } from '../core/seed';
+import type { ShipType } from '../core/types';
 import {
+  canBoard,
   computeRunStats,
   defaultSave,
   exportSave,
@@ -18,9 +24,11 @@ import {
   priceOf,
   purchase,
   selectCharacter,
+  setDestination,
   setGun,
   setLook,
   setPerk,
+  setTool,
   type SaveData,
   type ShopItem,
 } from '../core/progression';
@@ -71,8 +79,9 @@ export class HubView {
         </nav>
         <main class="hub-body"></main>
         <footer class="hub-launch">
+          <div class="dest" role="radiogroup" aria-label="Destination" data-dest></div>
           <button class="btn launch" data-action="launch">LAUNCH ▸</button>
-          <button class="btn ghost daily" data-action="daily" title="Same ship for everyone today">DAILY</button>
+          <button class="btn ghost daily" data-action="daily"></button>
         </footer>
       </div>
       <div class="hub-toast" role="status" aria-live="polite"></div>`;
@@ -138,6 +147,13 @@ export class HubView {
         return this.update(setGun(this.save, Number(d.slot) as 0 | 1, d.id as WeaponId));
       case 'perk':
         return this.update(setPerk(this.save, (d.id || null) as PerkId | null));
+      case 'tool':
+        return this.update(setTool(this.save, d.id as ToolId));
+      case 'destination': {
+        const ship = d.ship as ShipType;
+        if (!canBoard(this.save, ship)) return this.toast('Find more crew logs to locate research vessels', true);
+        return this.update(setDestination(this.save, ship));
+      }
       case 'export':
         return this.doExport();
       case 'import':
@@ -208,12 +224,28 @@ export class HubView {
       log: () => this.logTab(),
     };
     this.body.innerHTML = views[this.tab]();
+    this.renderLaunchBar();
 
     const canvas = this.body.querySelector<HTMLCanvasElement>('canvas[data-preview]');
     if (canvas) {
       const stats = computeRunStats(this.save);
       drawCharacterPreview(canvas, stats.character.id, stats.colours);
     }
+  }
+
+  private renderLaunchBar() {
+    const dest = this.save.loadout.destination;
+    const option = (ship: ShipType, label: string) => {
+      const locked = !canBoard(this.save, ship);
+      return `<button class="dest-option ${locked ? 'locked' : ''}" role="radio" data-action="destination" data-ship="${ship}"
+        aria-checked="${dest === ship}">${locked ? '🔒 ' : ''}${label}</button>`;
+    };
+    this.root.querySelector('[data-dest]')!.innerHTML =
+      option('freighter', 'FREIGHTER') + option('research', 'RESEARCH');
+    const todays = dailyShip(dailySeed(new Date())) === 'research' ? 'research vessel' : 'freighter';
+    const daily = this.root.querySelector<HTMLElement>('[data-action="daily"]')!;
+    daily.textContent = 'DAILY';
+    daily.title = `Today's shared ship: a ${todays}`;
   }
 
   private priceTag(item: ShopItem): { label: string; cls: string } {
@@ -298,6 +330,13 @@ export class HubView {
       ),
     ].join('');
 
+    const tools = s.tools
+      .map(
+        (id) => `<button class="choice" data-action="tool" data-id="${id}" aria-pressed="${s.loadout.tool === id}">
+          <span>${TOOLS[id].name}</span><small>${TOOLS[id].blurb}</small></button>`,
+      )
+      .join('');
+
     const missing = Object.keys(PERKS).length - s.perks.length;
     return `
       <section class="hub-section"><h3>Primary gun · key 1</h3><div class="choices">${gunSlot(0)}</div></section>
@@ -305,8 +344,8 @@ export class HubView {
       <section class="hub-section"><h3>Perk</h3><div class="choices">${perks}</div>
         ${missing ? `<p class="hub-note" style="margin-top:8px">${missing} more perk${missing > 1 ? 's' : ''} available in Upgrades.</p>` : ''}
       </section>
-      <section class="hub-section"><h3>Tool</h3>
-        <div class="row"><div><div class="row-name">Cutting torch</div><div class="row-desc">Opens cracked walls. Hacking and grav tools arrive in later versions.</div></div></div>
+      <section class="hub-section"><h3>Tool · F / right-click</h3><div class="choices">${tools}</div>
+        ${s.tools.length < Object.keys(TOOLS).length ? '<p class="hub-note" style="margin-top:8px">The hacking tool is for sale in Upgrades.</p>' : ''}
       </section>`;
   }
 
@@ -336,6 +375,16 @@ export class HubView {
       )
       .join('');
 
+    const toolRows = (Object.keys(TOOLS) as ToolId[])
+      .filter((id) => TOOLS[id].cost > 0)
+      .map(
+        (id) => `<div class="row">
+          <div><div class="row-name">${TOOLS[id].name}</div><div class="row-desc">${TOOLS[id].blurb}</div></div>
+          ${this.buyButton({ kind: 'tool', id }, 'BUY', `${TOOLS[id].name} added to your kit`)}
+        </div>`,
+      )
+      .join('');
+
     const perks = (Object.keys(PERKS) as PerkId[])
       .map(
         (id) => `<div class="row">
@@ -353,8 +402,35 @@ export class HubView {
         ${this.buyButton({ kind: 'character', id: 'robot' }, 'BUY', `${robot.name} unlocked`)}</div>
       </div></section>
       <section class="hub-section"><h3>Systems</h3><div class="rows">${stats}</div></section>
-      <section class="hub-section"><h3>Armoury</h3><div class="rows">${armoury}</div></section>
+      <section class="hub-section"><h3>Armoury</h3><div class="rows">${armoury}${toolRows}</div></section>
       <section class="hub-section"><h3>Perks</h3><div class="rows">${perks}</div></section>`;
+  }
+
+  private codexSection(): string {
+    const found = this.save.codex;
+    return CHAPTERS.map((chapter) => {
+      const progress = chapterProgress(found, chapter.id);
+      const entries = CODEX.filter((e) => e.chapter === chapter.id)
+        .map((e, i) => {
+          if (!found.includes(e.id)) {
+            const where = e.ship === 'research' ? 'research vessel' : 'freighter';
+            return `<div class="log locked"><span class="log-n">${String(i + 1).padStart(2, '0')}</span> ??? <small>Not yet recovered · ${where}</small></div>`;
+          }
+          return `<details class="log">
+            <summary><span class="log-n">${String(i + 1).padStart(2, '0')}</span> ${e.title}</summary>
+            <p class="log-author">${e.author}</p>
+            <p>${e.body}</p>
+          </details>`;
+        })
+        .join('');
+      const reward = progress.complete
+        ? '<span class="log-reward done">Chapter complete</span>'
+        : `<span class="log-reward">Complete for +${chapter.reward} salvage</span>`;
+      return `<section class="hub-section"><h3>Codex · Chapter ${chapter.id}: ${chapter.title} · ${progress.found}/${progress.total}</h3>
+        <div class="logs">${entries}</div>${reward}
+        <p class="hub-note" style="margin-top:6px">One data log is hidden deep in each ship. You keep logs even if you don't make it out.</p>
+      </section>`;
+    }).join('');
   }
 
   private logTab(): string {
@@ -367,12 +443,11 @@ export class HubView {
           ${stat(st.extractions, 'EXTRACTIONS')}
           ${stat(st.bestHaul, 'BEST HAUL')}
           ${stat(st.totalBanked, 'TOTAL BANKED')}
-          ${stat(st.dronesDestroyed, 'DRONES DOWN')}
+          ${stat(st.dronesDestroyed, 'HOSTILES DOWN')}
+          ${stat(this.save.codex.length, 'LOGS FOUND')}
         </div>
       </section>
-      <section class="hub-section"><h3>Codex</h3>
-        <div class="card"><p class="hub-note">0 data logs recovered. Crew logs start turning up in the wrecks in v0.3…</p></div>
-      </section>
+      ${this.codexSection()}
       <section class="hub-section"><h3>Move your save</h3>
         <p class="hub-note">Progress is saved in this browser. Copy a save code to carry it to another device.</p>
         <div class="btn-row"><button class="btn ghost" data-action="export">COPY SAVE CODE</button></div>

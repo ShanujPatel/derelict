@@ -15,19 +15,30 @@ A real-time, top-down sci-fi roguelike that runs in the browser. Board abandoned
 | Move | WASD / arrow keys |
 | Aim and fire | Mouse / left click (hold) |
 | Swap gun | Q, 1 / 2, or mouse wheel |
-| Cutting torch | F or right click, facing a cracked wall |
+| Tool (torch or hacking tool) | F or right click |
 
-**On a phone or tablet:** left thumb moves, right thumb aims and fires. The **GUN** and **TORCH** buttons sit on the right. Works in portrait and landscape.
+**On a phone or tablet:** left thumb moves, right thumb aims and fires. The **GUN** and **TORCH**/**HACK** buttons sit on the right. Works in portrait and landscape.
 
 <img src="docs/screenshot-mobile.png" alt="Mobile portrait screenshot" width="260">
 
-Find salvage crates and O₂ canisters, avoid or destroy the patrol drones, and reach the green extraction pad. Salvage only counts if you extract. The green arrow round your suit points to the exit.
+Find salvage crates and O₂ canisters, fight or avoid what lives aboard, and reach the green extraction pad. Salvage only counts if you extract. The green arrow round your suit points to the exit.
+
+**Two kinds of wreck:**
+
+- **Corporate freighters** are guarded by patrol drones and wall turrets.
+- **Research vessels** are overrun by the Bloom: fast crawlers, acid-spitting pods and egg sacs that keep hatching. Find the right crew log to unlock them.
+
+**Tools:** the cutting torch opens cracked walls for shortcuts. The hacking tool turns turrets to your side and opens locked caches; stand close and keep still while it works.
+
+**Crew logs:** every ship hides one data log. Collect them to piece together what happened to the Halcyon Drift and the Lacuna. You keep logs even if you die.
+
+![Research vessel](docs/screenshot-research.png)
 
 **Between runs** you're back on your own ship. Spend banked salvage on:
 
 - **Crew:** unlock the armoured Robot, which runs on battery instead of oxygen.
 - **Systems:** hull plating, life support and servo boot upgrades.
-- **Armoury:** the Railgun, which pierces a whole line of drones.
+- **Armoury:** the Railgun, which pierces a whole line of enemies, and the Hacking tool.
 - **Perks:** Scavenger, Cold cutter, Scrapper or Second wind, one per run.
 - **Cosmetics:** suit, visor, chassis and optics colours.
 
@@ -61,11 +72,11 @@ npm run build      # production build in dist/
 
 ```
 src/
-  core/      Pure game logic: RNG, seeds, deck generator, tile display rules,
-             pathing, oxygen, weapons, progression (shop, saves, export codes),
-             virtual-stick maths, screen sizing.
+  core/      Pure game logic: RNG, seeds, deck generator (per ship type), tile display
+             rules, pathing, oxygen, weapons, codex, progression (shop, saves, export
+             codes), virtual-stick maths, screen sizing.
              No Phaser imports, so it's fully unit-tested.
-  scenes/    Phaser scenes: Boot (builds textures), Hub and Game.
+  scenes/    Phaser scenes: Boot (builds textures), Hub and Game, plus enemy AI.
   hub/       Between-runs screens as an HTML/CSS overlay.
   ui/        Touch controls (twin virtual sticks).
   art/       Original pixel art defined in code: no binary assets.
@@ -73,7 +84,7 @@ tests/       Vitest unit tests for everything in core/.
 docs/        Game design document.
 ```
 
-**Procedural generation.** Each deck is built from a seed with a deterministic RNG (mulberry32), so the same seed always gives the same ship. Rooms are placed and joined to their nearest neighbour with two-tile corridors, and a few extra loops are added. Extraction goes in the room furthest from the start on foot. Thin walls that would save a long walk become weak walls you can cut with the torch. Tests check these rules across 150 seeds: every floor tile is reachable, drones never spawn near the start, and cutting weak walls only ever adds shortcuts.
+**Procedural generation.** Each deck is built from a seed with a deterministic RNG (mulberry32), so the same seed always gives the same ship. Rooms are placed and joined to their nearest neighbour with two-tile corridors, and a few extra loops are added. Extraction goes in the room furthest from the start on foot. Thin walls that would save a long walk become weak walls you can cut with the torch. Each ship type has its own spawn table: freighters mount turrets against walls, research vessels breed aliens. The data log always goes in the furthest 40% of the ship. Tests check these rules across 100 seeds of each ship type: every floor tile is reachable, enemies never spawn near the start, and cutting weak walls only ever adds shortcuts.
 
 ## Roadmap
 
@@ -82,7 +93,7 @@ See the full [game design document](docs/GDD.md).
 - [x] **v0.1** Salvager, freighter decks, drones, two guns, cutting torch, oxygen, seeded runs, CI/CD
 - [x] **v0.1.1** New pixel art, lighting, touch controls, portrait and landscape mobile support
 - [x] **v0.2** Robot character, customisation, hub with permanent unlocks, railgun, perks
-- [ ] **v0.3** Research vessels, alien enemies, codex chapter 1, hacking tool
+- [x] **v0.3** Research vessels, alien enemies, turrets, hacking tool, codex chapter 1
 - [ ] **v0.4** Daily leaderboard, rival salvagers, grav tool
 - [ ] **Later** Bosses, more codex chapters, more ship types
 

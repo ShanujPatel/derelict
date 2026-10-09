@@ -1,34 +1,78 @@
 import { createRng, type Rng } from './rng';
 import { hashString } from './seed';
 import { bfsDistances } from './pathing';
-import { Tile, type Point, type Room, type Spawn } from './types';
+import { Tile, type Point, type Room, type ShipType, type Spawn, type SpawnKind } from './types';
+
+export interface SpawnRule {
+  count: number;
+  /** Minimum walking distance (tiles) from the start. Negative = fraction of the deck's furthest tile. */
+  minDistance: number;
+  /** Salvage or oxygen value range; [0, 0] for enemies. */
+  value: [number, number];
+  /** Only place against a wall (turrets). */
+  againstWall?: boolean;
+}
 
 export interface DeckOptions {
+  ship: ShipType;
   width: number;
   height: number;
   maxRooms: number;
   minRoomSize: number;
   maxRoomSize: number;
-  drones: number;
-  oxygen: number;
-  salvage: number;
   maxWeakWalls: number;
-  /** Drones never spawn closer than this (walking tiles) to the start. */
-  minDroneDistance: number;
+  /** Placed in this order, so the list order is part of the seed's layout. */
+  spawns: [SpawnKind, SpawnRule][];
 }
 
-export const DEFAULT_DECK_OPTIONS: DeckOptions = {
-  width: 64,
-  height: 48,
-  maxRooms: 12,
-  minRoomSize: 5,
-  maxRoomSize: 11,
-  drones: 10,
-  oxygen: 4,
-  salvage: 8,
-  maxWeakWalls: 8,
-  minDroneDistance: 12,
+const enemy = (count: number, minDistance: number, againstWall = false): SpawnRule => ({
+  count,
+  minDistance,
+  value: [0, 0],
+  againstWall,
+});
+
+export const DECK_OPTIONS: Record<ShipType, DeckOptions> = {
+  freighter: {
+    ship: 'freighter',
+    width: 64,
+    height: 48,
+    maxRooms: 12,
+    minRoomSize: 5,
+    maxRoomSize: 11,
+    maxWeakWalls: 8,
+    spawns: [
+      ['drone', enemy(9, 12)],
+      ['oxygen', { count: 4, minDistance: 1, value: [35, 35] }],
+      ['salvage', { count: 8, minDistance: 1, value: [5, 25] }],
+      ['turret', enemy(3, 14, true)],
+      ['cache', { count: 2, minDistance: 10, value: [30, 50] }],
+      ['datalog', { count: 1, minDistance: -0.6, value: [0, 0] }],
+    ],
+  },
+  research: {
+    ship: 'research',
+    width: 60,
+    height: 48,
+    maxRooms: 15,
+    minRoomSize: 5,
+    maxRoomSize: 9,
+    maxWeakWalls: 8,
+    spawns: [
+      ['crawler', enemy(7, 12)],
+      ['spitter', enemy(4, 14)],
+      ['egg', enemy(4, 16)],
+      ['oxygen', { count: 5, minDistance: 1, value: [35, 35] }],
+      ['salvage', { count: 9, minDistance: 1, value: [8, 30] }],
+      ['cache', { count: 2, minDistance: 10, value: [40, 60] }],
+      ['datalog', { count: 1, minDistance: -0.6, value: [0, 0] }],
+    ],
+  },
 };
+
+/** Kept for older callers and tests: the freighter layout. */
+export const DEFAULT_DECK_OPTIONS = DECK_OPTIONS.freighter;
+export const MIN_ENEMY_DISTANCE = 12;
 
 export interface Deck {
   seed: string;
@@ -39,14 +83,16 @@ export interface Deck {
   start: Point;
   extraction: Point;
   spawns: Spawn[];
+  ship: ShipType;
   /** Thin walls the cutting torch can open to make shortcuts. */
   weakWalls: Point[];
 }
 
-/** Builds one ship deck. Pure and deterministic: same seed + options = same deck. */
-export function generateDeck(seed: string, options: Partial<DeckOptions> = {}): Deck {
-  const opts = { ...DEFAULT_DECK_OPTIONS, ...options };
-  const rng = createRng(hashString(seed));
+/** Builds one ship deck. Pure and deterministic: same seed + ship + options = same deck. */
+export function generateDeck(seed: string, ship: ShipType = 'freighter', options: Partial<DeckOptions> = {}): Deck {
+  const opts = { ...DECK_OPTIONS[ship], ...options, ship };
+  // Freighters keep the original seed hash so v0.1/v0.2 seeds still give the same layout.
+  const rng = createRng(hashString(ship === 'freighter' ? seed : `${seed}:${ship}`));
   const { width, height } = opts;
 
   const tiles: Tile[][] = Array.from({ length: height }, () =>
@@ -77,7 +123,7 @@ export function generateDeck(seed: string, options: Partial<DeckOptions> = {}): 
   const weakWalls = placeWeakWalls(rng, tiles, dist, opts.maxWeakWalls);
   const spawns = placeSpawns(rng, rooms, tiles, dist, start, extraction, opts);
 
-  return { seed, width, height, tiles, rooms, start, extraction, spawns, weakWalls };
+  return { seed, ship, width, height, tiles, rooms, start, extraction, spawns, weakWalls };
 }
 
 function centre(r: Room): Point {
@@ -215,22 +261,23 @@ function placeSpawns(
   const spawns: Spawn[] = [];
   const taken = new Set([`${start.x},${start.y}`, `${extraction.x},${extraction.y}`]);
   const otherRooms = rooms.slice(1);
+  const furthest = Math.max(...dist.flat());
+  const nextToWall = (x: number, y: number) =>
+    [[1, 0], [-1, 0], [0, 1], [0, -1]].some(([dx, dy]) => tiles[y + dy]?.[x + dx] === Tile.Wall);
 
-  const place = (kind: Spawn['kind'], count: number, value: () => number, minDist: number) => {
+  for (const [kind, rule] of o.spawns) {
+    const minDist = rule.minDistance < 0 ? Math.floor(-rule.minDistance * furthest) : rule.minDistance;
     let placed = 0;
-    for (let attempt = 0; attempt < count * 30 && placed < count; attempt++) {
+    for (let attempt = 0; attempt < rule.count * 60 && placed < rule.count; attempt++) {
       const r = rng.pick(otherRooms);
       const p = { x: rng.int(r.x, r.x + r.w - 1), y: rng.int(r.y, r.y + r.h - 1) };
       const key = `${p.x},${p.y}`;
       if (taken.has(key) || tiles[p.y][p.x] !== Tile.Floor || dist[p.y][p.x] < minDist) continue;
+      if (rule.againstWall && !nextToWall(p.x, p.y)) continue;
       taken.add(key);
-      spawns.push({ ...p, kind, value: value() });
+      spawns.push({ ...p, kind: kind as SpawnKind, value: rng.int(rule.value[0], rule.value[1]) });
       placed++;
     }
-  };
-
-  place('drone', o.drones, () => 0, o.minDroneDistance);
-  place('oxygen', o.oxygen, () => 35, 1);
-  place('salvage', o.salvage, () => rng.int(5, 25), 1);
+  }
   return spawns;
 }

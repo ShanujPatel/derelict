@@ -1,6 +1,16 @@
 import Phaser from 'phaser';
 import {
+  ACID,
   BULLET,
+  CACHE_FRAMES,
+  CRAWLER_FRAMES,
+  DATALOG,
+  EGG_FRAMES,
+  FREIGHTER_THEME,
+  RESEARCH_THEME,
+  SPITTER_FRAMES,
+  TURRET_BARREL,
+  TURRET_FRAMES,
   DRONE_FRAMES,
   FLASH,
   LAMP,
@@ -25,6 +35,11 @@ export class BootScene extends Phaser.Scene {
 
   create() {
     makeSpriteSheet(this, 'drone', DRONE_FRAMES);
+    makeSpriteSheet(this, 'crawler', CRAWLER_FRAMES);
+    makeSpriteSheet(this, 'spitter', SPITTER_FRAMES);
+    makeSpriteSheet(this, 'egg', EGG_FRAMES);
+    makeSpriteSheet(this, 'turret', TURRET_FRAMES);
+    makeSpriteSheet(this, 'cache', CACHE_FRAMES);
     const singles: Record<string, PixelSprite> = {
       bullet: BULLET,
       flash: FLASH,
@@ -33,10 +48,14 @@ export class BootScene extends Phaser.Scene {
       salvage: SALVAGE,
       lamp: LAMP,
       spark: SPARK,
+      acid: ACID,
+      barrel: TURRET_BARREL,
+      datalog: DATALOG,
     };
     for (const [key, sprite] of Object.entries(singles)) makeSpriteSheet(this, key, [sprite]);
 
-    this.canvas('tiles', TILE_SIZE * DISPLAY_TILE_COUNT, TILE_SIZE, paintTileset);
+    this.canvas('tiles-freighter', TILE_SIZE * DISPLAY_TILE_COUNT, TILE_SIZE, (ctx) => paintTileset(ctx, FREIGHTER_THEME));
+    this.canvas('tiles-research', TILE_SIZE * DISPLAY_TILE_COUNT, TILE_SIZE, (ctx) => paintTileset(ctx, RESEARCH_THEME));
     this.canvas('light', 240, 240, (ctx) => paintLight(ctx, 120));
     this.canvas('light-small', 64, 64, (ctx) => paintLight(ctx, 32));
     this.canvas('shadow', 12, 5, (ctx) => {
@@ -59,12 +78,11 @@ export class BootScene extends Phaser.Scene {
     g.generateTexture('exit', 24, 24);
     g.destroy();
 
-    this.anims.create({
-      key: 'drone-idle',
-      frames: [0, 1].map((frame) => ({ key: 'drone', frame })),
-      frameRate: 3,
-      repeat: -1,
-    });
+    const loop = (key: string, texture: string, frameRate: number) =>
+      this.anims.create({ key, frames: [0, 1].map((frame) => ({ key: texture, frame })), frameRate, repeat: -1 });
+    loop('drone-idle', 'drone', 3);
+    loop('crawler-run', 'crawler', 10);
+    loop('egg-pulse', 'egg', 2);
 
     // A shared link (?seed= or ?daily) boards that ship straight away; otherwise start in the hub.
     const search = window.location.search;
