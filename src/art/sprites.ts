@@ -185,6 +185,29 @@ export const OXYGEN: PixelSprite = {
   ],
 };
 
+/** Health pack: a white case with a red cross. */
+export const MEDKIT: PixelSprite = {
+  palette: { k: '#2a1015', w: '#eef0f4', g: '#b8bec9', r: '#e8283d', h: '#ff8a96' },
+  rows: [
+    '...kk...',
+    '..k..k..',
+    'kkkkkkkk',
+    'kwwrrwwk',
+    'kwwrhwwk',
+    'krrrrrrk',
+    'krrhrrrk',
+    'kwwrrwwk',
+    'kggrrggk',
+    'kkkkkkkk',
+  ],
+};
+
+/** The robot's version: a repair kit with a green wrench-cross. */
+export const REPAIR_KIT: PixelSprite = {
+  palette: { k: '#14201a', w: '#c9d2cf', g: '#8e9a96', r: '#3ddc84', h: '#b6ffd4' },
+  rows: MEDKIT.rows,
+};
+
 export const SALVAGE: PixelSprite = {
   palette: { k: '#2a1a08', y: '#e8b04a', Y: '#ffd98a', d: '#8a5a1c' },
   rows: [

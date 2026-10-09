@@ -25,7 +25,7 @@ A real-time, top-down sci-fi roguelike that runs in the browser. Board abandoned
 
 <img src="docs/screenshot-mobile.png" alt="Mobile portrait screenshot" width="260">
 
-Find salvage crates and O₂ canisters, fight or avoid what lives aboard, and reach the green extraction pad. Salvage only counts if you extract. The green arrow round your suit points to the exit.
+Find salvage crates and O₂ canisters, grab the glowing health packs (repair kits for the robot) to patch yourself up, fight or avoid what lives aboard, and reach the green extraction pad. Salvage only counts if you extract. The green arrow round your suit points to the exit.
 
 **Two kinds of wreck:**
 

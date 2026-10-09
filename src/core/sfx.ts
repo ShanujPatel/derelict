@@ -131,6 +131,13 @@ export const SFX = {
       L({ wave: 'sine', from: 600, to: 900, duration: 0.2, volume: 0.12 }),
     ],
   },
+  heal: {
+    layers: [
+      L({ wave: 'sine', from: 440, to: 660, duration: 0.18, volume: 0.22 }),
+      L({ wave: 'triangle', from: 660, to: 990, duration: 0.28, volume: 0.14, delay: 0.1 }),
+      L({ wave: 'noise', from: 0, to: 0, duration: 0.3, volume: 0.08, filter: { type: 'highpass', from: 4000, to: 7000 } }),
+    ],
+  },
   datalog: {
     layers: [
       L({ wave: 'triangle', from: 660, to: 660, duration: 0.12, volume: 0.2 }),

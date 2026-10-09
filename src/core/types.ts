@@ -30,13 +30,13 @@ export const SHIP_TYPES: readonly ShipType[] = ['freighter', 'research'];
  */
 export type EnemyKind = 'drone' | 'turret' | 'crawler' | 'spitter' | 'egg' | 'raider' | 'brute';
 /** Things to pick up or open. */
-export type ItemKind = 'oxygen' | 'salvage' | 'cache' | 'datalog';
+export type ItemKind = 'oxygen' | 'salvage' | 'cache' | 'datalog' | 'medkit';
 export type SpawnKind = EnemyKind | ItemKind;
 
 export const ENEMY_KINDS: readonly EnemyKind[] = ['drone', 'turret', 'crawler', 'spitter', 'egg', 'raider', 'brute'];
 
 export interface Spawn extends Point {
   kind: SpawnKind;
-  /** Salvage credits or oxygen amount; 0 for enemies and data logs. */
+  /** Salvage credits, oxygen or health amount; 0 for enemies and data logs. */
   value: number;
 }

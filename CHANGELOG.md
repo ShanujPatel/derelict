@@ -1,6 +1,15 @@
 # Changelog
 
-## [0.5.2] — Unreleased
+## [0.5.3] — Unreleased
+
+### Added
+- Health packs: three on every ship, each in a different room and at least 8 tiles from the start. Each restores 35 health; the robot finds green repair kits instead. They glow in the dark, and if you're already at full health you walk over them and they stay put for later.
+- A heal sound.
+
+### Notes
+- Health packs are placed with their own random stream, so every existing seed keeps exactly the same layout, enemies and loot; packs are only added. A test checks this for both ship types.
+
+## [0.5.2] — 2026-10-09
 
 ### Changed
 - The DAILY button is now themed by today's mission: hazard-striped amber for a freighter, teal with Bloom spores for a research vessel. It shows the ship type, the wreck's name and NEW (pulsing) or your best today. The pulse respects reduced-motion settings.

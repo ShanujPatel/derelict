@@ -243,6 +243,7 @@ export class GameScene extends Phaser.Scene implements EnemyWorld {
       switch (s.kind) {
         case 'oxygen':
         case 'salvage':
+        case 'medkit':
           this.addPickup(x, y, s.kind, s.value);
           break;
         case 'cache': {
@@ -830,7 +831,15 @@ export class GameScene extends Phaser.Scene implements EnemyWorld {
     if (!item.active) return;
     const kind = item.getData('kind') as string;
     const value = item.getData('value') as number;
-    if (kind === 'oxygen') {
+    if (kind === 'medkit') {
+      // Left where it is when you're already at full health, for later.
+      if (this.hp >= this.stats.maxHp) return;
+      const healed = Math.min(value, this.stats.maxHp - this.hp);
+      this.hp += healed;
+      audio.play('heal');
+      this.floatText(item.x, item.y, `+${Math.round(healed)} ${this.isRobot ? 'REPAIR' : 'HP'}`, '#ff6b7d');
+      this.tweens.add({ targets: this.player, alpha: 0.6, yoyo: true, duration: 80 });
+    } else if (kind === 'oxygen') {
       this.oxygen = refillOxygen(this.oxygen, value);
       audio.play('oxygen');
       this.floatText(item.x, item.y, `+${value} ${this.isRobot ? 'PWR' : 'O₂'}`, this.isRobot ? '#ffd166' : '#6fd6ff');
@@ -1049,7 +1058,8 @@ export class GameScene extends Phaser.Scene implements EnemyWorld {
       if (e.active && kindOf(e) === 'egg') light('light-small', e.x, e.y, 32);
     }
     for (const p of this.pickups.getChildren() as Sprite[]) {
-      if (p.active && p.getData('kind') === 'datalog') light('light-small', p.x, p.y, 32);
+      const kind = p.active ? p.getData('kind') : null;
+      if (kind === 'datalog' || kind === 'medkit') light('light-small', p.x, p.y, 32);
     }
   }
 
@@ -1142,8 +1152,8 @@ export class GameScene extends Phaser.Scene implements EnemyWorld {
     return this.stats.perk?.id === id;
   }
 
-  private addPickup(x: number, y: number, kind: 'oxygen' | 'salvage' | 'datalog', value: number) {
-    const texture = kind === 'oxygen' && this.isRobot ? 'battery' : kind;
+  private addPickup(x: number, y: number, kind: 'oxygen' | 'salvage' | 'datalog' | 'medkit', value: number) {
+    const texture = kind === 'oxygen' && this.isRobot ? 'battery' : kind === 'medkit' && this.isRobot ? 'repairkit' : kind;
     const item = this.pickups.create(x, y, texture) as Sprite;
     item.setDepth(5).setData({ kind, value });
     this.tweens.add({ targets: item, y: y - 2, yoyo: true, repeat: -1, duration: 600 });

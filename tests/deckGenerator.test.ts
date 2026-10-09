@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { DECK_OPTIONS, MIN_ENEMY_DISTANCE, generateDeck } from '../src/core/deckGenerator';
+import { DECK_OPTIONS, MEDKIT_MIN_DISTANCE, MIN_ENEMY_DISTANCE, generateDeck } from '../src/core/deckGenerator';
 import { bfsDistances } from '../src/core/pathing';
 import { ENEMY_KINDS, SHIP_TYPES, Tile, type EnemyKind, type ShipType } from '../src/core/types';
 
@@ -109,7 +109,7 @@ describe('generateDeck', () => {
   it('item values stay inside their configured ranges', () => {
     for (const ship of SHIP_TYPES) {
       const rules = new Map(DECK_OPTIONS[ship].spawns);
-      for (const s of generateDeck('loot', ship).spawns) {
+      for (const s of generateDeck('loot', ship).spawns.filter((x) => x.kind !== 'medkit')) {
         const [lo, hi] = rules.get(s.kind)!.value;
         expect(s.value).toBeGreaterThanOrEqual(lo);
         expect(s.value).toBeLessThanOrEqual(hi);
@@ -124,5 +124,36 @@ describe('generateDeck', () => {
       const avg = counts.reduce((a, b) => a + b, 0) / counts.length;
       expect(avg / wanted, ship).toBeGreaterThan(0.9);
     }
+  });
+
+  describe('health packs', () => {
+    it('places the full set on every ship, each in a different room away from the start', () => {
+      for (const [seed, ship] of CASES) {
+        const deck = generateDeck(seed, ship);
+        const kits = deck.spawns.filter((s) => s.kind === 'medkit');
+        expect(kits, `${seed} ${ship}`).toHaveLength(DECK_OPTIONS[ship].medkits.count);
+        const dist = bfsDistances(deck.tiles, deck.start);
+        const roomOf = (p: { x: number; y: number }) =>
+          deck.rooms.findIndex((r) => p.x >= r.x && p.x < r.x + r.w && p.y >= r.y && p.y < r.y + r.h);
+        expect(new Set(kits.map(roomOf)).size).toBe(kits.length);
+        for (const k of kits) {
+          expect(deck.tiles[k.y][k.x]).toBe(Tile.Floor);
+          expect(dist[k.y][k.x]).toBeGreaterThanOrEqual(MEDKIT_MIN_DISTANCE);
+          expect(k.value).toBe(DECK_OPTIONS[ship].medkits.heal);
+        }
+        const keys = deck.spawns.map((s) => `${s.x},${s.y}`);
+        expect(new Set(keys).size, 'no two spawns share a tile').toBe(keys.length);
+      }
+    });
+
+    it("don't change anything else about a seed's layout", () => {
+      for (const ship of SHIP_TYPES) {
+        for (const seed of SEEDS.slice(0, 20)) {
+          const withKits = generateDeck(seed, ship);
+          const without = generateDeck(seed, ship, { medkits: { count: 0, heal: 0 } });
+          expect({ ...withKits, spawns: withKits.spawns.filter((s) => s.kind !== 'medkit') }).toEqual(without);
+        }
+      }
+    });
   });
 });

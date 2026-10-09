@@ -23,6 +23,8 @@ export interface DeckOptions {
   maxWeakWalls: number;
   /** Placed in this order, so the list order is part of the seed's layout. */
   spawns: [SpawnKind, SpawnRule][];
+  /** Health packs: how many, and how much health each restores. */
+  medkits: { count: number; heal: number };
 }
 
 const enemy = (count: number, minDistance: number, againstWall = false): SpawnRule => ({
@@ -49,6 +51,7 @@ export const DECK_OPTIONS: Record<ShipType, DeckOptions> = {
       ['cache', { count: 2, minDistance: 10, value: [30, 50] }],
       ['datalog', { count: 1, minDistance: -0.6, value: [0, 0] }],
     ],
+    medkits: { count: 3, heal: 35 },
   },
   research: {
     ship: 'research',
@@ -67,6 +70,7 @@ export const DECK_OPTIONS: Record<ShipType, DeckOptions> = {
       ['cache', { count: 2, minDistance: 10, value: [40, 60] }],
       ['datalog', { count: 1, minDistance: -0.6, value: [0, 0] }],
     ],
+    medkits: { count: 3, heal: 35 },
   },
 };
 
@@ -122,6 +126,7 @@ export function generateDeck(seed: string, ship: ShipType = 'freighter', options
 
   const weakWalls = placeWeakWalls(rng, tiles, dist, opts.maxWeakWalls);
   const spawns = placeSpawns(rng, rooms, tiles, dist, start, extraction, opts);
+  spawns.push(...placeMedkits(seed, ship, rooms, tiles, dist, spawns, [start, extraction], opts.medkits));
 
   return { seed, ship, width, height, tiles, rooms, start, extraction, spawns, weakWalls };
 }
@@ -247,6 +252,41 @@ function placeWeakWalls(rng: Rng, tiles: Tile[][], dist: number[][], max: number
     chosen.push(seg);
   }
   return chosen.flat();
+}
+
+/**
+ * Health packs use their own random stream, so adding them didn't move
+ * anything else: every seed from before v0.5.3 keeps the same layout. Each
+ * pack goes in a different room, away from the start, on a free floor tile.
+ */
+export const MEDKIT_MIN_DISTANCE = 8;
+
+function placeMedkits(
+  seed: string,
+  ship: ShipType,
+  rooms: Room[],
+  tiles: Tile[][],
+  dist: number[][],
+  existing: Spawn[],
+  reserved: Point[],
+  rule: { count: number; heal: number },
+): Spawn[] {
+  const rng = createRng(hashString(`${seed}:${ship}:medkits`));
+  const taken = new Set([...existing, ...reserved].map((p) => `${p.x},${p.y}`));
+  const used = new Set<Room>();
+  const kits: Spawn[] = [];
+  const candidates = rooms.slice(1);
+  for (let attempt = 0; attempt < rule.count * 80 && kits.length < rule.count; attempt++) {
+    const r = rng.pick(candidates);
+    if (used.has(r) && used.size < candidates.length) continue;
+    const p = { x: rng.int(r.x, r.x + r.w - 1), y: rng.int(r.y, r.y + r.h - 1) };
+    const key = `${p.x},${p.y}`;
+    if (taken.has(key) || tiles[p.y][p.x] !== Tile.Floor || dist[p.y][p.x] < MEDKIT_MIN_DISTANCE) continue;
+    taken.add(key);
+    used.add(r);
+    kits.push({ ...p, kind: 'medkit', value: rule.heal });
+  }
+  return kits;
 }
 
 function placeSpawns(

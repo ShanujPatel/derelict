@@ -31,6 +31,8 @@ Hub (your salvage ship)
 - Salvager: **oxygen** — refilled by O₂ canisters and life-support rooms.
 - Robot: **battery** — refilled by power cells and charging stations.
 
+**Health packs (v0.5.3):** three per ship, 35 health each (repair kits for the robot). Placed from their own seeded stream so existing seeds keep their layouts; left in place if picked up at full health.
+
 Dying loses unbanked loot; codex pages found are always kept.
 
 ## 3. Characters
@@ -165,6 +167,7 @@ Each version is a tagged GitHub release with notes.
 | **v0.4** ✅ | Online daily leaderboard (Supabase); Gravecutter rival boarding party (raiders + shielded brute); grav tool |
 | **v0.5** ✅ | Synthesised SFX and generative music; settings and volume; pause menu; hit-pause; death and extraction moments |
 | **v0.5.1** ✅ | Player names: random unique sci-fi names, editable in the Crew tab, shown on the leaderboard |
+| **v0.5.3** ✅ | Health packs / repair kits on every ship |
 | **Later** | Bosses; codex chapters 2–3; more ship types; gamepad polish; accessibility options |
 
 ## 13. Open questions
