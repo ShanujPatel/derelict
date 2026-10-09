@@ -16,10 +16,12 @@ A real-time, top-down sci-fi roguelike that runs in the browser. Board abandoned
 | Aim and fire | Mouse / left click (hold) |
 | Swap gun | Q, 1 / 2, or mouse wheel |
 | Tool (torch, hacking or grav) | F or right click |
+| Dodge roll | Shift or Space |
+| Scanner map | Tab |
 | Pause | Esc or P |
 | Mute | M |
 
-**On a phone or tablet:** left thumb moves, right thumb aims and fires. The **GUN** and tool buttons sit on the right, and **II** at the top pauses. Works in portrait and landscape.
+**On a phone or tablet:** left thumb moves, right thumb aims and fires. The **GUN**, tool and **ROLL** buttons sit on the right; **II** at the top pauses and **MAP** opens the scanner. Works in portrait and landscape.
 
 **Sound:** every sound effect and the music are synthesised in the browser with Web Audio. There are no audio files. Each ship type has its own theme, and drums fade in when things are hunting you. Volume sliders, screen shake and flashes are under **Log → Settings**.
 
@@ -33,6 +35,12 @@ Find salvage crates and O₂ canisters, grab the glowing health packs (repair ki
 - **Research vessels** are overrun by the Bloom: fast crawlers, acid-spitting pods and egg sacs that keep hatching. Find the right crew log to unlock them.
 
 **Gravecutters:** about a minute into every run, a rival salvage crew docks behind you. Raiders strip loose salvage and shoot in bursts; the brute's riot shield blocks shots from the front, so flank it, stun it or use the railgun. Take them down to get your loot back.
+
+**Field kit:** a dodge roll you can't be hit during (short cooldown), and a scanner map that fills in as you explore, marking the exit and any loot you've seen. Red fuel drums explode when shot, hurting everything nearby (you too), blowing open cracked walls and setting off other drums. Enemies sometimes drop O₂ or health, more often when you're running low.
+
+**Ship conditions:** every derelict has a condition picked from its seed: a power failure (darker, no lamps), a hull breach (faster oxygen drain), a rich manifest (salvage worth more), hardened security (more gold **elite** hostiles with double health and extra loot), a jammed scanner, or nothing unusual. The daily card shows today's.
+
+**Achievements:** 13 goals, from *Ghost* (extract without destroying anything) to *Demolitions* (three kills with drum blasts in one run). Each pays salvage once; see them under **Log**.
 
 **Tools:** the cutting torch opens cracked walls for shortcuts. The hacking tool turns turrets to your side and opens locked caches. The grav tool fires a cone-shaped push that shoves and stuns enemies and swats incoming shots aside.
 
@@ -83,6 +91,7 @@ npm run build      # production build in dist/
 src/
   core/      Pure game logic: RNG, seeds, deck generator (per ship type), tile display
              rules, pathfinding, oxygen, weapons, codex, rivals, leaderboard rules,
+             field kit (dodge, drops, blasts, scanner), ship conditions, achievements,
              progression (shop, saves, export codes), virtual-stick maths, screen sizing.
              No Phaser imports, so it's fully unit-tested.
              Sound effect and music definitions (sfx, music) live here too.
@@ -108,7 +117,8 @@ See the full [game design document](docs/GDD.md).
 - [x] **v0.3** Research vessels, alien enemies, turrets, hacking tool, codex chapter 1
 - [x] **v0.4** Online daily leaderboard, Gravecutter rivals, grav tool
 - [x] **v0.5** Synthesised sound and music, pause menu, settings, hit-pause, death and extraction moments
-- [x] **v0.5.1** Name your salvager: random unique sci-fi names, shown on the leaderboard
+- [x] **v0.5.1–0.5.3** Unique player names, themed daily button, health packs
+- [x] **v0.6** Field kit: dodge roll, scanner map, explosive drums, supply drops, ship conditions, elite hostiles, achievements
 - [ ] **Later** Bosses, more codex chapters, more ship types
 
 ## Licence

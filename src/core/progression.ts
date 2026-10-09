@@ -16,6 +16,7 @@ import {
   type ToolId,
 } from './catalog';
 import { CHAPTERS, CODEX, chapterProgress, isResearchUnlocked } from './codex';
+import { ACHIEVEMENT_IDS, type Achievement } from './achievements';
 import { SHIP_TYPES, type ShipType } from './types';
 import { cleanCallsign } from './leaderboard';
 import { hashString } from './seed';
@@ -36,6 +37,8 @@ export interface SaveData {
   codex: string[];
   /** Chapter rewards already paid out, e.g. 'chapter-1'. */
   rewards: string[];
+  /** Achievement ids earned (each pays once). */
+  achievements: string[];
   /** Anonymous id for the leaderboard; set by storage on first load. */
   playerId: string;
   /** Your name, shown on the leaderboard. */
@@ -97,6 +100,7 @@ export function defaultSave(): SaveData {
     tools: ['torch'],
     codex: [],
     rewards: [],
+    achievements: [],
     playerId: '',
     callsign: '',
     callsignClaimed: '',
@@ -321,6 +325,18 @@ export function applyRunResult(save: SaveData, result: RunResult): SaveData {
   return next;
 }
 
+/** Records newly earned achievements and pays their salvage rewards. */
+export function awardAchievements(save: SaveData, earned: readonly Achievement[]): SaveData {
+  const fresh = earned.filter((a) => !save.achievements.includes(a.id));
+  if (!fresh.length) return save;
+  const next = clone(save);
+  for (const a of fresh) {
+    next.achievements.push(a.id);
+    next.credits += a.reward;
+  }
+  return next;
+}
+
 /** Everything the game needs to set up a run from the current save. */
 export interface RunStats {
   character: CharacterDef;
@@ -385,6 +401,7 @@ export function sanitizeSave(raw: unknown): SaveData {
   const tools = pickIds(raw.tools, Object.keys(TOOLS) as ToolId[], d.tools);
   const codex = pickIds(raw.codex, CODEX.map((e) => e.id), []);
   const rewards = pickIds(raw.rewards, CHAPTERS.map((c) => `chapter-${c.id}`), []);
+  const achievements = pickIds(raw.achievements, ACHIEVEMENT_IDS, []);
 
   const up = isObj(raw.upgrades) ? raw.upgrades : {};
   const upgrades = {} as Record<StatId, number>;
@@ -410,6 +427,7 @@ export function sanitizeSave(raw: unknown): SaveData {
     tools,
     codex,
     rewards,
+    achievements,
     cosmetics,
     upgrades,
   };

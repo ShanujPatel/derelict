@@ -131,6 +131,34 @@ export const SFX = {
       L({ wave: 'sine', from: 600, to: 900, duration: 0.2, volume: 0.12 }),
     ],
   },
+  dodge: {
+    jitter: 0.08,
+    layers: [
+      L({ wave: 'noise', from: 0, to: 0, duration: 0.18, volume: 0.3, filter: { type: 'bandpass', from: 600, to: 2600, q: 1.4 } }),
+      L({ wave: 'sine', from: 160, to: 90, duration: 0.12, volume: 0.12 }),
+    ],
+  },
+  explosion: {
+    jitter: 0.1,
+    maxVoices: 3,
+    layers: [
+      L({ wave: 'noise', from: 0, to: 0, duration: 0.7, volume: 0.5, filter: { type: 'lowpass', from: 2400, to: 120 } }),
+      L({ wave: 'sine', from: 110, to: 30, duration: 0.5, volume: 0.4 }),
+      L({ wave: 'square', from: 70, to: 40, duration: 0.25, volume: 0.08 }),
+    ],
+  },
+  achievement: {
+    layers: [
+      L({ wave: 'triangle', from: 523, to: 523, duration: 0.1, volume: 0.16 }),
+      L({ wave: 'triangle', from: 659, to: 659, duration: 0.1, volume: 0.16, delay: 0.1 }),
+      L({ wave: 'triangle', from: 784, to: 784, duration: 0.1, volume: 0.16, delay: 0.2 }),
+      L({ wave: 'triangle', from: 1047, to: 1047, duration: 0.4, volume: 0.18, delay: 0.3 }),
+    ],
+  },
+  scan: {
+    cooldownMs: 120,
+    layers: [L({ wave: 'sine', from: 900, to: 1500, duration: 0.12, volume: 0.1 })],
+  },
   heal: {
     layers: [
       L({ wave: 'sine', from: 440, to: 660, duration: 0.18, volume: 0.22 }),

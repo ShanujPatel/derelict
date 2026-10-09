@@ -613,6 +613,67 @@
   opacity: 0.5;
 }
 
+/* ---------------------------------------------------------------- achievements */
+
+.achievements {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
+  gap: 6px;
+}
+
+.ach {
+  display: grid;
+  grid-template-columns: auto 1fr auto;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 10px;
+  border: 1px solid var(--line);
+  background: rgba(10, 14, 23, 0.6);
+  color: var(--muted);
+}
+
+.ach i {
+  font-style: normal;
+  font-size: 16px;
+}
+
+.ach span {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.ach b {
+  font-weight: 400;
+  color: var(--text);
+  font-size: 12px;
+  letter-spacing: 0.06em;
+}
+
+.ach small {
+  font-size: 10px;
+  line-height: 1.35;
+}
+
+.ach em {
+  font-style: normal;
+  font-size: 11px;
+  color: var(--amber);
+}
+
+.ach.got {
+  border-color: rgba(255, 209, 102, 0.55);
+  background: rgba(255, 209, 102, 0.06);
+}
+
+.ach.got i,
+.ach.got em {
+  color: var(--amber);
+}
+
 /* ---------------------------------------------------------------- settings */
 
 .settings {
@@ -803,6 +864,19 @@
   letter-spacing: 0.18em;
   color: var(--theme, var(--text));
   margin-bottom: 6px;
+}
+
+.daily-condition {
+  font-size: 11px;
+  color: var(--text);
+  margin-bottom: 6px;
+}
+
+.daily-condition b {
+  font-weight: 400;
+  color: #ff9a3c;
+  letter-spacing: 0.12em;
+  margin-right: 6px;
 }
 
 .btn.daily-play {

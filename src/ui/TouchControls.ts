@@ -15,7 +15,7 @@ interface ActiveStick {
 }
 
 interface Button {
-  id: 'swap' | 'torch' | 'pause';
+  id: 'swap' | 'torch' | 'pause' | 'dodge' | 'map';
   label: string;
   x: number;
   y: number;
@@ -78,7 +78,9 @@ export class TouchControls {
     this.buttons = [
       { id: 'swap', label: 'GUN', x, y: height * 0.5 },
       { id: 'torch', label: this.toolLabel, x, y: height * 0.5 - 40 },
+      { id: 'dodge', label: 'ROLL', x, y: height * 0.5 + 40 },
       { id: 'pause', label: 'II', x: width / 2, y: 16 },
+      { id: 'map', label: 'MAP', x: width / 2 + 38, y: 16 },
     ];
     this.labels.forEach((l) => l.destroy());
     this.labels = this.buttons.map((b) =>
@@ -109,7 +111,7 @@ export class TouchControls {
     for (const b of this.buttons) {
       const down = this.pressed.has(b.id);
       g.fillStyle(0x0d1220, down ? 0.85 : 0.55).fillCircle(b.x, b.y, BUTTON_RADIUS);
-      g.lineStyle(1, b.id === 'torch' ? 0xffd166 : 0xd7e3ff, down ? 0.9 : 0.5).strokeCircle(b.x, b.y, BUTTON_RADIUS);
+      g.lineStyle(1, b.id === 'torch' ? 0xffd166 : b.id === 'dodge' ? 0x6fd6ff : 0xd7e3ff, down ? 0.9 : 0.5).strokeCircle(b.x, b.y, BUTTON_RADIUS);
     }
   }
 

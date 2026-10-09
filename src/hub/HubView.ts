@@ -16,6 +16,8 @@ import { dailySeed, dailyShip } from '../core/seed';
 import { dayFromDailySeed, formatDuration, type BoardEntry } from '../core/leaderboard';
 import { leaderboard } from '../net/leaderboard';
 import { vesselName } from '../core/names';
+import { ACHIEVEMENTS } from '../core/achievements';
+import { conditionFor } from '../core/conditions';
 import { chooseName, ensureName, rollName, type NameResult } from '../net/names';
 import type { ShipType } from '../core/types';
 import {
@@ -340,7 +342,7 @@ export class HubView {
       <span class="d-top"><i class="d-dot"></i>DAILY · ${mission.best === null ? 'NEW' : `BEST ${mission.best}`}</span>
       <span class="d-ship">${mission.icon} ${mission.label} ▸</span>
       <span class="d-name">${mission.vessel}</span>`;
-    daily.title = `Today's shared ship: ${mission.vessel}, a ${mission.label.toLowerCase()}. ${mission.threat}`;
+    daily.title = `Today's shared ship: ${mission.vessel}, a ${mission.label.toLowerCase()}. ${mission.threat} Condition: ${mission.condition.name}.`;
   }
 
   /** Today's shared ship, for the themed DAILY button and the DAILY tab. */
@@ -354,6 +356,7 @@ export class HubView {
       label: ship === 'research' ? 'RESEARCH' : 'FREIGHTER',
       icon: ship === 'research' ? '☣' : '⛭',
       threat: ship === 'research' ? 'Overrun by the Bloom.' : 'Guarded by drones and turrets.',
+      condition: conditionFor(seed, ship),
       best: this.save.daily.day === day ? this.save.daily.best : null,
     };
   }
@@ -583,6 +586,7 @@ export class HubView {
       <section class="card daily-card theme-${mission.ship}">
         <div class="daily-head"><span>${date.toUpperCase()}</span><b>${mission.icon} ${ship.toUpperCase()}</b></div>
         <div class="daily-vessel">${mission.vessel}</div>
+        <div class="daily-condition"><b>${mission.condition.name.toUpperCase()}</b> ${mission.condition.blurb}</div>
         <p class="hub-note">${mission.threat} Same ship for everyone today. Extract to post your salvage; only your best run counts. Ties go to the faster run.</p>
         <div class="daily-best">Your best today <b>${best ?? '—'}</b></div>
         <div class="btn-row"><button class="btn daily-play theme-${mission.ship}" data-action="daily">BOARD ${mission.vessel} ▸</button></div>
@@ -642,6 +646,19 @@ export class HubView {
     }).join('');
   }
 
+  private achievementsSection(): string {
+    const have = new Set(this.save.achievements);
+    const items = ACHIEVEMENTS.map(
+      (a) => `<li class="ach ${have.has(a.id) ? 'got' : ''}">
+        <i aria-hidden="true">${have.has(a.id) ? '★' : '☆'}</i>
+        <span><b>${a.name}</b><small>${a.description}</small></span>
+        <em>${have.has(a.id) ? 'DONE' : `+${a.reward}`}</em>
+      </li>`,
+    ).join('');
+    return `<section class="hub-section"><h3>Achievements · ${have.size}/${ACHIEVEMENTS.length}</h3>
+      <ul class="achievements">${items}</ul></section>`;
+  }
+
   private logTab(): string {
     const st = this.save.stats;
     const stat = (value: number, label: string) => `<div class="stat"><b>${value}</b><span>${label}</span></div>`;
@@ -656,6 +673,7 @@ export class HubView {
           ${stat(this.save.codex.length, 'LOGS FOUND')}
         </div>
       </section>
+      ${this.achievementsSection()}
       ${this.codexSection()}
       ${this.settingsSection()}
       <section class="hub-section"><h3>Move your save</h3>

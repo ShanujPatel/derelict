@@ -117,9 +117,21 @@ Unlocks widen options rather than making runs trivially easy.
 
 | Input | Move | Aim / fire | Tool | Interact |
 |---|---|---|---|---|
-| Keyboard + mouse | WASD | Mouse / left click | Right click | E |
+| Keyboard + mouse | WASD | Mouse / left click | Right click / F | E |
 | Gamepad | Left stick | Right stick / RT | LT | A |
 | Touch | Left virtual stick | Right virtual stick (auto-fire) | Button | Button |
+
+**v0.6 additions:** dodge roll on Shift/Space (touch: ROLL), scanner map on Tab (touch: MAP).
+
+## 9b. Field kit and ship conditions (v0.6)
+
+- **Dodge roll:** ~3 tiles, untouchable for the whole roll, 0.9 s cooldown (robot 1.15 s, shorter roll).
+- **Scanner:** reveals a 5-tile radius plus the room you're in; marks the exit and seen loot. Feeds the *Cartographer* achievement.
+- **Fuel drums:** 2 hits; 44 px blast, 6 damage to enemies and 30 to you at the centre, a third at the edge; opens cracked walls; chains. Own seeded stream.
+- **Supply drops:** 12% per kill (+18% when below 35% health or oxygen), weighted to what you need.
+- **Conditions:** seeded per ship: Quiet, Power failure, Hull breach, Rich manifest, Hardened security, Scanner jammed. Modifiers only; layouts never change.
+- **Elites:** 2× HP, 1.12× speed, guaranteed extra salvage; 8% base chance, 30% on hardened ships.
+- **Achievements:** 13 one-off goals paying 25–100 salvage, checked at the end of each run (some don't need you to extract).
 
 ## 10. Art and audio
 
@@ -168,6 +180,7 @@ Each version is a tagged GitHub release with notes.
 | **v0.5** ✅ | Synthesised SFX and generative music; settings and volume; pause menu; hit-pause; death and extraction moments |
 | **v0.5.1** ✅ | Player names: random unique sci-fi names, editable in the Crew tab, shown on the leaderboard |
 | **v0.5.3** ✅ | Health packs / repair kits on every ship |
+| **v0.6** ✅ | Field kit: dodge roll, scanner map, explosive drums, supply drops, ship conditions, elites, achievements |
 | **Later** | Bosses; codex chapters 2–3; more ship types; gamepad polish; accessibility options |
 
 ## 13. Open questions

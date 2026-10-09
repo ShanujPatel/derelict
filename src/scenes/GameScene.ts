@@ -20,7 +20,9 @@ import {
 import { dayFromDailySeed } from '../core/leaderboard';
 import { findPath, hasLineOfSight, nearestByWalking } from '../core/pathing';
 import { GRAV_CONE, GRAV_RANGE, hitsShield, inGravCone, rivalEvent, type RivalEvent } from '../core/rivals';
-import { applyRunResult, computeRunStats, recordDaily, setClaimedName, type RunStats, type SaveData } from '../core/progression';
+import { newAchievements, type Achievement } from '../core/achievements';
+import { CONDITIONS, ELITE, conditionFor, isElite, type Condition } from '../core/conditions';
+import { applyRunResult, awardAchievements, computeRunStats, recordDaily, setClaimedName, type RunStats, type SaveData } from '../core/progression';
 import { hashString, type ResolvedSeed } from '../core/seed';
 import { ENEMY_KINDS, Tile, type EnemyKind, type Point } from '../core/types';
 import { WEAPONS, pelletAngles, type WeaponDef } from '../core/weapons';
@@ -29,12 +31,27 @@ import { loadSave, storeSave } from '../storage';
 import { TouchControls } from '../ui/TouchControls';
 import { audio } from '../audio/engine';
 import { combatIntensity } from '../core/music';
+import {
+  BARREL,
+  DODGE,
+  DROP_RULES,
+  blastDamage,
+  createExplored,
+  dodgeDirection,
+  dodgeDistance,
+  dodgeReadiness,
+  exploredFraction,
+  isExplored,
+  reveal,
+  rollSupplyDrop,
+} from '../core/fieldkit';
 import { spatialise, type SfxName } from '../core/sfx';
 import { ENEMY_STATS, RIVAL_KINDS, isHacked, kindOf, updateEnemy, type EnemyWorld } from './enemies';
 
 type Sprite = Phaser.Physics.Arcade.Sprite;
 type Keys = Record<
-  'W' | 'A' | 'S' | 'D' | 'UP' | 'LEFT' | 'DOWN' | 'RIGHT' | 'Q' | 'F' | 'R' | 'ENTER' | 'ONE' | 'TWO' | 'ESC' | 'P',
+  | 'W' | 'A' | 'S' | 'D' | 'UP' | 'LEFT' | 'DOWN' | 'RIGHT' | 'Q' | 'F' | 'R' | 'ENTER' | 'ONE' | 'TWO' | 'ESC' | 'P'
+  | 'SHIFT' | 'SPACE' | 'TAB',
   Phaser.Input.Keyboard.Key
 >;
 
@@ -75,6 +92,7 @@ export class GameScene extends Phaser.Scene implements EnemyWorld {
   private hostileShots!: Phaser.Physics.Arcade.Group;
   private pickups!: Phaser.Physics.Arcade.StaticGroup;
   private caches!: Phaser.Physics.Arcade.StaticGroup;
+  private drums!: Phaser.Physics.Arcade.StaticGroup;
   private exitPad!: Phaser.Physics.Arcade.Image;
   private sparks!: Phaser.GameObjects.Particles.ParticleEmitter;
   private muzzle!: Phaser.GameObjects.Image;
@@ -95,6 +113,9 @@ export class GameScene extends Phaser.Scene implements EnemyWorld {
 
   // Run state — reset in init() because Phaser reuses the scene instance on restart.
   private saveAtStart!: SaveData;
+  private condition: Condition = CONDITIONS.calm;
+  private elitesKilled = 0;
+  private conditionText!: Phaser.GameObjects.Text;
   private stats!: RunStats;
   private pendingLog: LogEntry | null = null;
   private logsFound: string[] = [];
@@ -119,6 +140,25 @@ export class GameScene extends Phaser.Scene implements EnemyWorld {
   private pausedAt = 0;
   private lookX = 0;
   private lookY = 0;
+  private lastDodgeAt = 0;
+  private dodgeUntil = 0;
+  private dodgeVec = { x: 0, y: 0 };
+  private dodgeFrom = { x: 0, y: 0 };
+  private nextGhostAt = 0;
+  private dodges = 0;
+  private blastKills = 0;
+  private damageTaken = 0;
+  private eggsDestroyed = 0;
+  private rivalsKilled = 0;
+  private rivalsBoarded = 0;
+  private hacks = 0;
+  private explored: Uint8Array = new Uint8Array(0);
+  private nextRevealAt = 0;
+  private mapOpen = false;
+  private mapDirty = true;
+  private mapTiles!: Phaser.GameObjects.Graphics;
+  private mapMarks!: Phaser.GameObjects.Graphics;
+  private mapText!: Phaser.GameObjects.Text;
   private ended = false;
 
   constructor() {
@@ -133,7 +173,9 @@ export class GameScene extends Phaser.Scene implements EnemyWorld {
     this.pendingLog = nextLogFor(this.saveAtStart.codex, this.run.ship);
     this.logsFound = [];
     this.hp = this.stats.maxHp;
-    this.oxygen = createOxygen(this.stats.capacity, this.stats.drainPerSecond);
+    this.condition = conditionFor(this.run.seed, this.run.ship);
+    this.elitesKilled = 0;
+    this.oxygen = createOxygen(this.stats.capacity, this.stats.drainPerSecond * this.condition.oxygenDrain);
     this.salvage = 0;
     this.kills = 0;
     this.secondWindUsed = false;
@@ -150,6 +192,19 @@ export class GameScene extends Phaser.Scene implements EnemyWorld {
     this.nextHackTickAt = 0;
     this.lookX = 0;
     this.lookY = 0;
+    this.lastDodgeAt = 0;
+    this.dodgeUntil = 0;
+    this.nextGhostAt = 0;
+    this.dodges = 0;
+    this.blastKills = 0;
+    this.damageTaken = 0;
+    this.eggsDestroyed = 0;
+    this.rivalsKilled = 0;
+    this.rivalsBoarded = 0;
+    this.hacks = 0;
+    this.nextRevealAt = 0;
+    this.mapOpen = false;
+    this.mapDirty = true;
     this.ended = false;
     this.lamps = [];
     this.endScreen = [];
@@ -160,6 +215,7 @@ export class GameScene extends Phaser.Scene implements EnemyWorld {
     this.physics.resume();
     this.deck = generateDeck(this.run.seed, this.run.ship);
     this.grid = this.deck.tiles.map((row) => [...row]);
+    this.explored = createExplored(this.deck.width, this.deck.height);
 
     this.buildMap();
     this.spawnEntities();
@@ -208,7 +264,7 @@ export class GameScene extends Phaser.Scene implements EnemyWorld {
     this.layer.setCollision([...SOLID_DISPLAY_TILES]);
 
     // Blinking warning lamps on some bulkheads.
-    for (const p of lampPositions(display, this.seedHash)) {
+    for (const p of this.condition.lampsOff ? [] : lampPositions(display, this.seedHash)) {
       const lamp = this.add.image(p.x * TILE_SIZE + 8, p.y * TILE_SIZE + 9, 'lamp').setDepth(3);
       if (this.run.ship === 'research') lamp.setTint(0x9bff5c);
       this.tweens.add({
@@ -234,21 +290,31 @@ export class GameScene extends Phaser.Scene implements EnemyWorld {
 
     this.pickups = this.physics.add.staticGroup();
     this.caches = this.physics.add.staticGroup();
+    this.drums = this.physics.add.staticGroup();
     this.enemies = this.physics.add.group();
     this.bullets = this.physics.add.group();
     this.hostileShots = this.physics.add.group();
 
+    let enemyIndex = 0;
     for (const s of this.deck.spawns) {
       const { x, y } = toWorld(s);
       switch (s.kind) {
-        case 'oxygen':
         case 'salvage':
+          this.addPickup(x, y, s.kind, Math.round(s.value * this.condition.salvage));
+          break;
+        case 'oxygen':
         case 'medkit':
           this.addPickup(x, y, s.kind, s.value);
           break;
         case 'cache': {
           const cache = this.caches.create(x, y, 'cache', 0) as Sprite;
-          cache.setDepth(5).setData({ value: s.value, open: false });
+          cache.setDepth(5).setData({ value: Math.round(s.value * this.condition.salvage), open: false });
+          break;
+        }
+        case 'drum': {
+          const drum = this.drums.create(x, y, 'drum') as Sprite;
+          drum.setDepth(6).setData({ hp: BARREL.hp, lit: false });
+          (drum.body as Phaser.Physics.Arcade.StaticBody).setSize(10, 10);
           break;
         }
         case 'datalog':
@@ -256,7 +322,10 @@ export class GameScene extends Phaser.Scene implements EnemyWorld {
           if (this.pendingLog) this.addPickup(x, y, 'datalog', 0);
           break;
         default:
-          if (ENEMY_KINDS.includes(s.kind)) this.spawnEnemy(s.kind, x, y);
+          if (ENEMY_KINDS.includes(s.kind)) {
+            const e = this.spawnEnemy(s.kind, x, y);
+            if (isElite(this.run.seed, this.run.ship, enemyIndex++, this.condition.eliteChance)) this.makeElite(e);
+          }
       }
     }
 
@@ -290,7 +359,10 @@ export class GameScene extends Phaser.Scene implements EnemyWorld {
     const kb = this.input.keyboard;
     if (!kb) throw new Error('Keyboard input unavailable');
     // No key capture, so typing still works in the hub after a run.
-    this.keys = kb.addKeys('W,A,S,D,UP,LEFT,DOWN,RIGHT,Q,F,R,ENTER,ONE,TWO,ESC,P', false) as Keys;
+    this.keys = kb.addKeys('W,A,S,D,UP,LEFT,DOWN,RIGHT,Q,F,R,ENTER,ONE,TWO,ESC,P,SHIFT,SPACE,TAB', false) as Keys;
+    // Tab and Space would otherwise move browser focus or scroll the page mid-run.
+    kb.addCapture('TAB,SPACE');
+    this.events.once('shutdown', () => kb.removeCapture('TAB,SPACE'));
     this.input.mouse?.disableContextMenu();
     this.input.on('wheel', () => this.switchWeapon());
     this.touch = new TouchControls(this, TOOL_LABEL[this.stats.tool.id]);
@@ -304,6 +376,17 @@ export class GameScene extends Phaser.Scene implements EnemyWorld {
     this.physics.add.collider(this.enemies, this.layer);
     this.physics.add.collider(this.enemies, this.enemies);
     this.physics.add.collider(this.enemies, this.caches);
+    this.physics.add.collider(this.player, this.drums);
+    this.physics.add.collider(this.enemies, this.drums);
+    const shootDrum = (shot: unknown, drum: unknown) => {
+      const b = shot as Sprite;
+      if (!b.active) return;
+      this.sparks.explode(3, b.x, b.y);
+      b.destroy();
+      this.damageDrum(drum as Sprite, 1);
+    };
+    this.physics.add.collider(this.bullets, this.drums, shootDrum);
+    this.physics.add.collider(this.hostileShots, this.drums, shootDrum);
 
     const spark = (b: unknown) => {
       const shot = b as Sprite;
@@ -341,6 +424,14 @@ export class GameScene extends Phaser.Scene implements EnemyWorld {
     this.weaponText = fixed(this.add.text(0, 0, '', FONT));
     const label = this.run.mode === 'daily' ? this.run.seed.toUpperCase() : `SEED ${this.run.seed}`;
     this.seedText = fixed(this.add.text(0, 0, label, { ...FONT, color: '#6f7fa3' }).setOrigin(1, 0));
+    this.conditionText = fixed(
+      this.add.text(0, 0, this.condition.id === 'calm' ? '' : this.condition.name.toUpperCase(), { ...FONT, color: '#ff9a3c' }).setOrigin(1, 0),
+    );
+    this.mapTiles = this.add.graphics().setScrollFactor(0).setDepth(120).setVisible(false);
+    this.mapMarks = this.add.graphics().setScrollFactor(0).setDepth(121).setVisible(false);
+    this.mapText = fixed(this.add.text(0, 0, '', { ...FONT, fontSize: '9px', color: '#6fd6ff', backgroundColor: '#05070c' }).setOrigin(0.5, 1))
+      .setDepth(122)
+      .setVisible(false);
   }
 
   /** Positions screen-space UI. Runs on start and whenever the window changes shape. */
@@ -352,8 +443,10 @@ export class GameScene extends Phaser.Scene implements EnemyWorld {
     this.o2Label.setPosition(8, 18);
     this.salvageText.setPosition(w - 8, 6);
     this.seedText.setPosition(w - 8, 18);
+    this.conditionText.setPosition(w - 8, 30);
     this.weaponText.setPosition(8, 32);
     this.touch.layout(w, h);
+    this.mapDirty = true;
   }
 
   private showIntro() {
@@ -364,8 +457,8 @@ export class GameScene extends Phaser.Scene implements EnemyWorld {
       grav: 'grav pulse: shove + stun, block shots',
     }[this.stats.tool.id];
     const help = this.touch.enabled
-      ? `Left thumb: move · right thumb: aim + fire\nGUN: swap · ${TOOL_LABEL[this.stats.tool.id]}: ${toolHint}\nReach the green EXIT`
-      : `WASD move · mouse aim + fire · Q swap gun\nF / right-click: ${toolHint} · reach the green EXIT`;
+      ? `Left thumb: move · right thumb: aim + fire\nGUN: swap · ROLL: dodge · ${TOOL_LABEL[this.stats.tool.id]}: ${toolHint}\nMAP: scanner · reach the green EXIT`
+      : `WASD move · mouse aim + fire · Q swap gun · Shift/Space roll\nF / right-click: ${toolHint} · Tab: scanner map · reach the green EXIT`;
     const title = this.run.ship === 'research' ? 'BOARDING RESEARCH VESSEL' : 'BOARDING DERELICT';
     const titleText = this.add
       .text(w / 2, h * 0.22, title, { ...FONT, fontSize: '16px', color: this.run.ship === 'research' ? '#9bff5c' : '#ffd166' })
@@ -378,6 +471,19 @@ export class GameScene extends Phaser.Scene implements EnemyWorld {
       .setScrollFactor(0)
       .setDepth(200);
     this.tweens.add({ targets: titleText, alpha: 0, delay: 1800, duration: 600 });
+    if (this.condition.id !== 'calm') {
+      const cond = this.add
+        .text(w / 2, h * 0.22 + 20, `${this.condition.name.toUpperCase()}\n${this.condition.blurb}`, {
+          ...FONT,
+          fontSize: '9px',
+          color: '#ff9a3c',
+          align: 'center',
+        })
+        .setOrigin(0.5, 0)
+        .setScrollFactor(0)
+        .setDepth(200);
+      this.tweens.add({ targets: cond, alpha: 0, delay: 3200, duration: 700 });
+    }
     this.tweens.add({ targets: hint, alpha: 0, delay: 7000, duration: 800 });
   }
 
@@ -426,11 +532,19 @@ export class GameScene extends Phaser.Scene implements EnemyWorld {
     return e;
   }
 
+  /** Elite: double health, a little faster, gold, and always drops extra salvage. */
+  private makeElite(e: Sprite) {
+    e.setData({ elite: true, hp: Math.ceil((e.getData('hp') as number) * ELITE.hpMultiplier), speedMul: ELITE.speedMultiplier });
+    e.setTint(0xffc94a).setScale(1.15);
+  }
+
   moveTowards(e: Sprite, target: Point, speed: number) {
+    speed *= (e.getData('speedMul') as number | undefined) ?? 1;
     this.physics.moveTo(e, target.x, target.y, speed);
   }
 
   followPath(e: Sprite, target: Point, speed: number) {
+    speed *= (e.getData('speedMul') as number | undefined) ?? 1;
     const goal = this.tileAt(target.x, target.y);
     const goalKey = `${goal.x},${goal.y}`;
     let path = e.getData('path') as Point[] | undefined;
@@ -458,6 +572,7 @@ export class GameScene extends Phaser.Scene implements EnemyWorld {
 
   private spawnRivals() {
     this.rivalsArrived = true;
+    this.rivalsBoarded = this.rivals.party.length;
     const start = toWorld(this.deck.start);
     const offsets = [[-12, -8], [12, -8], [0, 10], [-12, 10], [12, 10]];
     this.rivals.party.forEach((kind, i) => {
@@ -487,12 +602,101 @@ export class GameScene extends Phaser.Scene implements EnemyWorld {
     this.oxygen = tickOxygen(this.oxygen, seconds);
     if (isOxygenEmpty(this.oxygen)) {
       this.hp -= SUFFOCATION_DPS * seconds;
+      this.damageTaken += SUFFOCATION_DPS * seconds;
       if (this.hp <= 0) return this.endRun(false, this.isRobot ? 'Battery flat' : 'Oxygen depleted');
     }
 
     this.updateAudio(time);
+    this.updateScanner(time);
     this.drawLighting();
     this.drawHud();
+  }
+
+  // ---------------------------------------------------------------- scanner map
+
+  private updateScanner(time: number) {
+    if (time > this.nextRevealAt) {
+      this.nextRevealAt = time + 150;
+      if (reveal(this.explored, this.grid, this.deck.rooms, this.tileAt(this.player.x, this.player.y)) > 0) this.mapDirty = true;
+    }
+    if (Phaser.Input.Keyboard.JustDown(this.keys.TAB) || this.touch.consume('map')) {
+      this.mapOpen = !this.mapOpen;
+      this.mapDirty = true;
+      audio.play('scan');
+    }
+    this.mapTiles.setVisible(this.mapOpen);
+    this.mapMarks.setVisible(this.mapOpen);
+    this.mapText.setVisible(this.mapOpen);
+    if (this.mapOpen) this.drawScanner();
+  }
+
+  /** Where the map sits on screen and how big each tile is. */
+  private mapFrame() {
+    const { width: w, height: h } = this.scale;
+    const cell = Math.max(2, Math.floor(Math.min((w * 0.86) / this.deck.width, (h * 0.7) / this.deck.height)));
+    const mw = cell * this.deck.width;
+    const mh = cell * this.deck.height;
+    return { cell, x: Math.round((w - mw) / 2), y: Math.round((h - mh) / 2) - 4, mw, mh };
+  }
+
+  private drawScanner() {
+    const f = this.mapFrame();
+    const research = this.run.ship === 'research';
+    if (this.mapDirty) {
+      this.mapDirty = false;
+      const g = this.mapTiles.clear();
+      g.fillStyle(0x05070c, 0.94).fillRect(f.x - 6, f.y - 6, f.mw + 12, f.mh + 12);
+      g.lineStyle(1, research ? 0x4fd8d0 : 0x6fd6ff, 0.6).strokeRect(f.x - 6.5, f.y - 6.5, f.mw + 13, f.mh + 13);
+      const room = this.currentRoom();
+      const jammed = this.condition.scannerJammed;
+      for (let y = 0; y < this.deck.height; y++) {
+        for (let x = 0; x < this.deck.width; x++) {
+          if (!isExplored(this.explored, this.deck.width, { x, y })) continue;
+          if (jammed && !(room && x >= room.x - 1 && x <= room.x + room.w && y >= room.y - 1 && y <= room.y + room.h)) continue;
+          const t = this.grid[y][x];
+          if (t === Tile.Floor) g.fillStyle(research ? 0x173a36 : 0x1d2b45, 1);
+          else if (t === Tile.WeakWall) g.fillStyle(0x8a6a2a, 1);
+          else {
+            // Only draw walls that touch floor, so rooms read as outlines.
+            const edge = [[1, 0], [-1, 0], [0, 1], [0, -1]].some(([dx, dy]) => this.grid[y + dy]?.[x + dx] === Tile.Floor);
+            if (!edge) continue;
+            g.fillStyle(research ? 0x4fd8d0 : 0x6f8fc0, 0.75);
+          }
+          g.fillRect(f.x + x * f.cell, f.y + y * f.cell, f.cell, f.cell);
+        }
+      }
+      const pct = Math.round(exploredFraction(this.explored, this.grid) * 100);
+      const status = jammed ? 'SIGNAL JAMMED' : `${pct}% MAPPED`;
+      this.mapText.setPosition(this.scale.width / 2, f.y + f.mh + 18).setText(`SCANNER · ${status} · ${this.touch.enabled ? 'MAP' : 'TAB'} TO CLOSE`);
+      // Jammed, the map follows you room by room, so redraw it as you move.
+      if (jammed) this.mapDirty = true;
+    }
+
+    const g = this.mapMarks.clear();
+    const room = this.condition.scannerJammed ? this.currentRoom() : null;
+    const dot = (wx: number, wy: number, colour: number, size = 1) => {
+      const t = this.tileAt(wx, wy);
+      if (!isExplored(this.explored, this.deck.width, t)) return;
+      if (this.condition.scannerJammed && !(room && t.x >= room.x && t.x < room.x + room.w && t.y >= room.y && t.y < room.y + room.h)) return;
+      const s = Math.max(2, f.cell * size);
+      g.fillStyle(colour, 1).fillRect(f.x + t.x * f.cell + (f.cell - s) / 2, f.y + t.y * f.cell + (f.cell - s) / 2, s, s);
+    };
+    const colours: Record<string, number> = { salvage: 0xe8b04a, oxygen: 0x3fa7ff, medkit: 0xff3b4e, datalog: 0x5ef2ff };
+    for (const p of this.pickups.getChildren() as Sprite[]) {
+      if (p.active) dot(p.x, p.y, colours[p.getData('kind') as string] ?? 0xffffff);
+    }
+    for (const c of this.caches.getChildren() as Sprite[]) if (!c.getData('open')) dot(c.x, c.y, 0xb08a3a, 1.2);
+    for (const b of this.barrels()) dot(b.x, b.y, 0xff7b3a);
+    const blink = Math.floor(this.time.now / 300) % 2 === 0;
+    dot(this.exitPad.x, this.exitPad.y, 0x3dff9a, blink ? 1.8 : 1.3);
+    const p = this.tileAt(this.player.x, this.player.y);
+    g.fillStyle(0xffffff, 1).fillCircle(f.x + (p.x + 0.5) * f.cell, f.y + (p.y + 0.5) * f.cell, Math.max(2, f.cell * 0.8));
+    g.lineStyle(1, 0xffffff, 0.8).lineBetween(
+      f.x + (p.x + 0.5) * f.cell,
+      f.y + (p.y + 0.5) * f.cell,
+      f.x + (p.x + 0.5) * f.cell + Math.cos(this.player.rotation) * f.cell * 2.5,
+      f.y + (p.y + 0.5) * f.cell + Math.sin(this.player.rotation) * f.cell * 2.5,
+    );
   }
 
   private updateAudio(time: number) {
@@ -521,7 +725,25 @@ export class GameScene extends Phaser.Scene implements EnemyWorld {
       iy = t.move.y;
     }
     const speed = PLAYER_SPEED * this.stats.speedMultiplier;
-    this.player.setVelocity(ix * speed, iy * speed);
+    const rolled = Phaser.Math.Distance.Between(this.dodgeFrom.x, this.dodgeFrom.y, this.player.x, this.player.y);
+    if (time < this.dodgeUntil && rolled >= dodgeDistance(this.isRobot)) this.dodgeUntil = 0;
+    const dodging = time < this.dodgeUntil;
+    if (dodging) {
+      const rollSpeed = this.isRobot ? DODGE.robot.speed : DODGE.speed;
+      this.player.setVelocity(this.dodgeVec.x * rollSpeed, this.dodgeVec.y * rollSpeed);
+      // Stay untouchable for the whole roll, even if a slow frame stretches it out.
+      this.invulnerableUntil = Math.max(this.invulnerableUntil, time + 60);
+      if (time > this.nextGhostAt) {
+        this.nextGhostAt = time + 30;
+        const ghost = this.add
+          .image(this.player.x, this.player.y, this.player.texture.key, this.player.frame.name)
+          .setRotation(this.player.rotation)
+          .setDepth(10)
+          .setAlpha(0.45)
+          .setTintFill(this.isRobot ? 0xffd166 : 0x6fd6ff);
+        this.tweens.add({ targets: ghost, alpha: 0, duration: 220, onComplete: () => ghost.destroy() });
+      }
+    } else this.player.setVelocity(ix * speed, iy * speed);
     const moving = Math.abs(ix) + Math.abs(iy) > 0.05;
     if (moving) {
       this.player.anims.play(this.walkAnim, true);
@@ -555,6 +777,9 @@ export class GameScene extends Phaser.Scene implements EnemyWorld {
       return;
     }
 
+    const rollPressed = Phaser.Input.Keyboard.JustDown(k.SHIFT) || Phaser.Input.Keyboard.JustDown(k.SPACE) || t.consume('dodge');
+    if (rollPressed && !dodging && dodgeReadiness(time, this.lastDodgeAt, this.isRobot) >= 1) this.startDodge(time, ix, iy, aim);
+
     if (Phaser.Input.Keyboard.JustDown(k.Q) || t.consume('swap')) this.switchWeapon();
     if (Phaser.Input.Keyboard.JustDown(k.ONE)) this.weaponIndex = 0;
     if (Phaser.Input.Keyboard.JustDown(k.TWO)) this.weaponIndex = 1;
@@ -579,6 +804,19 @@ export class GameScene extends Phaser.Scene implements EnemyWorld {
   }
 
   // ---------------------------------------------------------------- actions
+
+  /** Dodge roll: a quick dash you can't be hit during. */
+  private startDodge(time: number, ix: number, iy: number, aim: number) {
+    this.dodgeVec = dodgeDirection(ix, iy, aim);
+    this.lastDodgeAt = time;
+    this.dodgeUntil = time + DODGE.maxMs;
+    this.dodgeFrom = { x: this.player.x, y: this.player.y };
+    this.invulnerableUntil = Math.max(this.invulnerableUntil, time + DODGE.invulnerableMs);
+    this.dodges += 1;
+    this.nextGhostAt = 0;
+    audio.play('dodge');
+    this.player.anims.play(this.walkAnim, true);
+  }
 
   private switchWeapon() {
     this.weaponIndex = (this.weaponIndex + 1) % this.weapons.length;
@@ -652,7 +890,7 @@ export class GameScene extends Phaser.Scene implements EnemyWorld {
     this.tweens.add({ targets: wave, scale: 1, alpha: 0, duration: 280, onComplete: () => wave.destroy() });
     this.shake(90, 0.005);
 
-    for (const e of this.enemies.getChildren() as Sprite[]) {
+    for (const e of [...this.enemies.getChildren()] as Sprite[]) {
       if (!e.active || isHacked(e) || ENEMY_STATS[kindOf(e)].solid || !inGravCone(x, y, aim, e.x, e.y)) continue;
       const a = Phaser.Math.Angle.Between(x, y, e.x, e.y);
       e.setVelocity(Math.cos(a) * 260, Math.sin(a) * 260);
@@ -669,6 +907,7 @@ export class GameScene extends Phaser.Scene implements EnemyWorld {
 
   private cutTile(x: number, y: number) {
     this.grid[y][x] = Tile.Floor;
+    this.mapDirty = true;
     // Redraw this tile and its neighbours so wall faces and shadows stay correct.
     for (let dy = -1; dy <= 1; dy++) {
       for (let dx = -1; dx <= 1; dx++) {
@@ -731,6 +970,7 @@ export class GameScene extends Phaser.Scene implements EnemyWorld {
   }
 
   private completeHack(target: Sprite) {
+    this.hacks += 1;
     if (target.getData('kind') === 'turret') {
       target.setData('hacked', true).setFrame(1);
       (target.getData('barrel') as Phaser.GameObjects.Image).setTint(0x9ff6ff);
@@ -772,7 +1012,11 @@ export class GameScene extends Phaser.Scene implements EnemyWorld {
     if (hp > 0) this.sfx('hit', enemy.x, enemy.y);
     enemy.setData({ hp, alertUntil: this.time.now + 4000 });
     enemy.setTintFill(0xffffff);
-    this.time.delayedCall(60, () => enemy.active && enemy.clearTint());
+    this.time.delayedCall(60, () => {
+      if (!enemy.active) return;
+      enemy.clearTint();
+      if (enemy.getData('elite')) enemy.setTint(0xffc94a);
+    });
     if (hp <= 0) this.killEnemy(enemy);
   }
 
@@ -790,6 +1034,13 @@ export class GameScene extends Phaser.Scene implements EnemyWorld {
     const parent = enemy.getData('parent') as Sprite | undefined;
     if (parent?.active) parent.setData('brood', Math.max(0, (parent.getData('brood') ?? 1) - 1));
     this.kills += 1;
+    if (kind === 'egg') this.eggsDestroyed += 1;
+    if (RIVAL_KINDS.includes(kind)) this.rivalsKilled += 1;
+    if (enemy.getData('elite')) {
+      this.elitesKilled += 1;
+      this.addPickup(enemy.x + 6, enemy.y - 5, 'salvage', Phaser.Math.Between(...ELITE.bonus));
+      this.floatText(enemy.x, enemy.y - 14, 'ELITE DOWN', '#ffc94a');
+    }
 
     const stolen = ((enemy.getData('loot') as number[] | undefined) ?? []).reduce((a, b) => a + b, 0);
     if (stolen > 0) {
@@ -799,6 +1050,16 @@ export class GameScene extends Phaser.Scene implements EnemyWorld {
     const [chance, min, max] = ENEMY_STATS[kind].drop;
     if (this.hasPerk('scrapper')) this.addPickup(enemy.x, enemy.y, 'salvage', Phaser.Math.Between(Math.max(min, 5), Math.max(max, 10)));
     else if (Math.random() < chance) this.addPickup(enemy.x, enemy.y, 'salvage', Phaser.Math.Between(min, max));
+
+    // Sometimes a supply drop too, more likely when you're low. Crawlers hatched from eggs
+    // never drop supplies, or egg sacs would be an endless oxygen farm.
+    if (!parent) {
+      const drop = rollSupplyDrop(Math.random(), Math.random(), this.hp / this.stats.maxHp, this.oxygen.current / this.oxygen.max);
+      if (drop) {
+        const amount = drop === 'medkit' ? DROP_RULES.healAmount : DROP_RULES.oxygenAmount;
+        this.addPickup(enemy.x - 7, enemy.y + 4, drop, amount);
+      }
+    }
     enemy.destroy();
   }
 
@@ -806,6 +1067,7 @@ export class GameScene extends Phaser.Scene implements EnemyWorld {
     if (this.time.now < this.invulnerableUntil || this.ended) return;
     this.invulnerableUntil = this.time.now + 800;
     this.hp -= amount * (1 - this.stats.armour);
+    this.damageTaken += amount * (1 - this.stats.armour);
     audio.play('playerHurt');
     this.hitStop(70);
     if (this.hp <= 0 && this.hasPerk('second-wind') && !this.secondWindUsed) {
@@ -860,6 +1122,8 @@ export class GameScene extends Phaser.Scene implements EnemyWorld {
   private endRun(extracted: boolean, reason = '') {
     if (this.ended) return;
     this.ended = true;
+    this.mapOpen = false;
+    for (const o of [this.mapTiles, this.mapMarks, this.mapText]) o.setVisible(false);
     this.player.anims.stop();
     this.player.setVelocity(0, 0);
     this.hackGfx.clear();
@@ -879,6 +1143,27 @@ export class GameScene extends Phaser.Scene implements EnemyWorld {
     });
     const day = this.run.mode === 'daily' ? dayFromDailySeed(this.run.seed) : null;
     if (day && extracted) after = recordDaily(after, day, this.salvage);
+    const earned = newAchievements(
+      {
+        extracted,
+        ship: this.run.ship,
+        daily: day !== null,
+        salvage: this.salvage,
+        kills: this.kills,
+        durationMs,
+        damageTaken: this.damageTaken,
+        dodges: this.dodges,
+        blastKills: this.blastKills,
+        explored: exploredFraction(this.explored, this.grid),
+        eggsDestroyed: this.eggsDestroyed,
+        rivalsKilled: this.rivalsKilled,
+        rivalsBoarded: this.rivalsBoarded,
+        hacks: this.hacks,
+        elitesKilled: this.elitesKilled,
+      },
+      before.achievements,
+    );
+    after = awardAchievements(after, earned);
     storeSave(after);
     const bonus = after.rewards.length > before.rewards.length;
     const banked = after.credits - before.credits;
@@ -887,7 +1172,7 @@ export class GameScene extends Phaser.Scene implements EnemyWorld {
 
     // Results appear after the extraction / death moment has played out.
     this.time.delayedCall(extracted ? 800 : 950, () =>
-      this.showResults(extracted, reason, { before, after, day, durationMs, bonus, banked, newBest, unlockedResearch }),
+      this.showResults(extracted, reason, { before, after, day, durationMs, bonus, banked, newBest, unlockedResearch, earned }),
     );
   }
 
@@ -924,9 +1209,10 @@ export class GameScene extends Phaser.Scene implements EnemyWorld {
       banked: number;
       newBest: boolean;
       unlockedResearch: boolean;
+      earned: Achievement[];
     },
   ) {
-    const { after, day, durationMs, bonus, banked, newBest, unlockedResearch } = r;
+    const { after, day, durationMs, bonus, banked, newBest, unlockedResearch, earned } = r;
     this.physics.pause();
     this.physics.world.timeScale = 1;
     this.tweens.timeScale = 1;
@@ -955,7 +1241,10 @@ export class GameScene extends Phaser.Scene implements EnemyWorld {
     if (this.logsFound.length) lines.push(`Data log kept: ${this.logsFound.length}`);
     if (bonus) lines.push('Chapter complete! +bonus salvage');
     if (unlockedResearch) lines.push('NEW DESTINATION: research vessels');
-    lines.push(`Ship's hold: ${after.credits}${bonus && !extracted ? ` (+${banked})` : ''}`);
+    for (const a of earned) lines.push(`★ ${a.name.toUpperCase()}  +${a.reward}`);
+    const paidWithoutExtracting = (bonus || earned.length > 0) && !extracted;
+    lines.push(`Ship's hold: ${after.credits}${paidWithoutExtracting ? ` (+${banked})` : ''}`);
+    if (earned.length) this.time.delayedCall(300, () => audio.play('achievement'));
     const summary = ui(this.add.text(w / 2, h / 2 - 12, lines.join('\n'), { ...FONT, fontSize: '11px', align: 'center' }).setOrigin(0.5));
     // Keep the title clear of the summary however many lines it has.
     title.setY(summary.y - summary.height / 2 - (extracted && day ? 34 : 18));
@@ -1046,7 +1335,7 @@ export class GameScene extends Phaser.Scene implements EnemyWorld {
   private drawLighting() {
     const view = this.cameras.main.worldView;
     const rt = this.darkness;
-    rt.clear().fill(0x000000, DARKNESS[this.run.ship]);
+    rt.clear().fill(0x000000, Math.min(0.9, DARKNESS[this.run.ship] + this.condition.darkness));
     const light = (key: string, x: number, y: number, size: number) => {
       if (x < view.x - size || x > view.right + size || y < view.y - size || y > view.bottom + size) return;
       rt.erase(key, x - view.x - size, y - view.y - size);
@@ -1076,6 +1365,16 @@ export class GameScene extends Phaser.Scene implements EnemyWorld {
     this.salvageText.setText(`SALVAGE ${this.salvage}`);
     const guns = this.weapons.map((w, i) => (i === this.weaponIndex ? `[${w.name}]` : ` ${w.name} `)).join(' ');
     this.weaponText.setText(`${guns}  · ${TOOL_LABEL[this.stats.tool.id]}`);
+
+    // Dodge recharge, as a thin bar under your feet while it refills.
+    const ready = dodgeReadiness(this.time.now, this.lastDodgeAt, this.isRobot);
+    if (ready < 1) {
+      const view = this.cameras.main.worldView;
+      const px = this.player.x - view.x;
+      const py = this.player.y - view.y;
+      g.fillStyle(0x0d1220, 0.8).fillRect(px - 9, py + 11, 18, 3);
+      g.fillStyle(this.isRobot ? 0xffd166 : 0x6fd6ff, 0.9).fillRect(px - 8, py + 12, 16 * ready, 1);
+    }
 
     // Arrow round the player pointing at the extraction pad.
     const dist = Phaser.Math.Distance.Between(this.player.x, this.player.y, this.exitPad.x, this.exitPad.y);
@@ -1146,6 +1445,80 @@ export class GameScene extends Phaser.Scene implements EnemyWorld {
 
   private get isRobot(): boolean {
     return this.stats.character.resource === 'battery';
+  }
+
+  private currentRoom() {
+    const p = this.tileAt(this.player.x, this.player.y);
+    return this.deck.rooms.find((r) => p.x >= r.x && p.x < r.x + r.w && p.y >= r.y && p.y < r.y + r.h) ?? null;
+  }
+
+  private barrels(): Sprite[] {
+    return (this.drums.getChildren() as Sprite[]).filter((d) => d.active);
+  }
+
+  // ---------------------------------------------------------------- explosive drums
+
+  private damageDrum(drum: Sprite, amount: number) {
+    if (!drum.active || drum.getData('lit')) return;
+    const hp = (drum.getData('hp') as number) - amount;
+    drum.setData('hp', hp);
+    drum.setTintFill(0xffffff);
+    this.time.delayedCall(50, () => drum.active && drum.clearTint());
+    if (hp <= 0) this.explodeDrum(drum);
+    else this.sfx('hit', drum.x, drum.y);
+  }
+
+  /** Blast: hurts everything nearby (you too), opens cracked walls, and sets off other drums. */
+  private explodeDrum(drum: Sprite) {
+    if (!drum.active || drum.getData('lit')) return;
+    drum.setData('lit', true);
+    const { x, y } = drum;
+    drum.destroy();
+    this.sfx('explosion', x, y);
+    this.sparks.explode(40, x, y);
+    const fire = this.add.circle(x, y, BARREL.radius, 0xff7b3a, 0.45).setDepth(18).setScale(0.2);
+    const ring = this.add.circle(x, y, BARREL.radius).setStrokeStyle(3, 0xffd166).setDepth(19).setScale(0.3);
+    this.tweens.add({ targets: fire, scale: 1, alpha: 0, duration: 320, onComplete: () => fire.destroy() });
+    this.tweens.add({ targets: ring, scale: 1.1, alpha: 0, duration: 380, onComplete: () => ring.destroy() });
+    const scorch = this.add.circle(x, y, 9, 0x000000, 0.35).setDepth(1);
+    this.tweens.add({ targets: scorch, alpha: 0, delay: 6000, duration: 2000, onComplete: () => scorch.destroy() });
+    const near = Phaser.Math.Distance.Between(x, y, this.player.x, this.player.y) < 200;
+    this.shake(near ? 260 : 120, near ? 0.018 : 0.006);
+    if (near && this.saveAtStart.settings.flashes) this.cameras.main.flash(90, 255, 140, 60);
+    this.hitStop(60);
+
+    // Copy the list: killing an enemy removes it from the group mid-loop.
+    for (const e of [...this.enemies.getChildren()] as Sprite[]) {
+      if (!e.active || isHacked(e)) continue;
+      const dmg = blastDamage(Phaser.Math.Distance.Between(x, y, e.x, e.y), BARREL.enemyDamage);
+      if (dmg <= 0) continue;
+      if (!ENEMY_STATS[kindOf(e)].solid) {
+        const a = Phaser.Math.Angle.Between(x, y, e.x, e.y);
+        e.setVelocity(Math.cos(a) * 220, Math.sin(a) * 220);
+      }
+      const before = this.kills;
+      this.damageEnemy(e, dmg);
+      if (this.kills > before) this.blastKills += 1;
+    }
+    const toYou = blastDamage(Phaser.Math.Distance.Between(x, y, this.player.x, this.player.y), BARREL.playerDamage);
+    if (toYou > 0) this.hurtPlayer(toYou);
+
+    // Cracked walls in the blast give way.
+    const centre = this.tileAt(x, y);
+    const reach = Math.ceil(BARREL.radius / TILE_SIZE);
+    for (let ty = centre.y - reach; ty <= centre.y + reach; ty++) {
+      for (let tx = centre.x - reach; tx <= centre.x + reach; tx++) {
+        if (this.grid[ty]?.[tx] !== Tile.WeakWall) continue;
+        const w = toWorld({ x: tx, y: ty });
+        if (Phaser.Math.Distance.Between(x, y, w.x, w.y) <= BARREL.radius * 0.75) this.cutTile(tx, ty);
+      }
+    }
+
+    for (const other of this.barrels()) {
+      if (Phaser.Math.Distance.Between(x, y, other.x, other.y) <= BARREL.radius) {
+        this.time.delayedCall(BARREL.chainDelayMs, () => this.explodeDrum(other));
+      }
+    }
   }
 
   private hasPerk(id: string): boolean {

@@ -109,7 +109,7 @@ describe('generateDeck', () => {
   it('item values stay inside their configured ranges', () => {
     for (const ship of SHIP_TYPES) {
       const rules = new Map(DECK_OPTIONS[ship].spawns);
-      for (const s of generateDeck('loot', ship).spawns.filter((x) => x.kind !== 'medkit')) {
+      for (const s of generateDeck('loot', ship).spawns.filter((x) => x.kind !== 'medkit' && x.kind !== 'drum')) {
         const [lo, hi] = rules.get(s.kind)!.value;
         expect(s.value).toBeGreaterThanOrEqual(lo);
         expect(s.value).toBeLessThanOrEqual(hi);
@@ -146,12 +146,28 @@ describe('generateDeck', () => {
       }
     });
 
+    it('places explosive drums against walls, apart, away from the start', () => {
+      for (const [seed, ship] of CASES) {
+        const deck = generateDeck(seed, ship);
+        const drums = deck.spawns.filter((s) => s.kind === 'drum');
+        expect(drums.length, `${seed} ${ship}`).toBeGreaterThanOrEqual(DECK_OPTIONS[ship].drums - 1);
+        const dist = bfsDistances(deck.tiles, deck.start);
+        for (const d of drums) {
+          expect(deck.tiles[d.y][d.x]).toBe(Tile.Floor);
+          expect(dist[d.y][d.x]).toBeGreaterThanOrEqual(6);
+          const wall = [[1, 0], [-1, 0], [0, 1], [0, -1]].some(([dx, dy]) => deck.tiles[d.y + dy]?.[d.x + dx] === Tile.Wall);
+          expect(wall).toBe(true);
+          expect(Math.abs(d.x - deck.extraction.x) > 1 || Math.abs(d.y - deck.extraction.y) > 1).toBe(true);
+        }
+      }
+    });
+
     it("don't change anything else about a seed's layout", () => {
       for (const ship of SHIP_TYPES) {
         for (const seed of SEEDS.slice(0, 20)) {
           const withKits = generateDeck(seed, ship);
-          const without = generateDeck(seed, ship, { medkits: { count: 0, heal: 0 } });
-          expect({ ...withKits, spawns: withKits.spawns.filter((s) => s.kind !== 'medkit') }).toEqual(without);
+          const without = generateDeck(seed, ship, { medkits: { count: 0, heal: 0 }, drums: 0 });
+          expect({ ...withKits, spawns: withKits.spawns.filter((s) => s.kind !== 'medkit' && s.kind !== 'drum') }).toEqual(without);
         }
       }
     });

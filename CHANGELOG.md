@@ -1,6 +1,24 @@
 # Changelog
 
-## [0.5.3] — Unreleased
+## [0.6.0] — Unreleased: Field kit
+
+### Added
+- **Dodge roll** (Shift / Space, or the ROLL touch button): a quick dash of about three tiles you can't be hit during, with a short cooldown shown as a bar under your feet. The robot rolls a little shorter and recharges slower. The roll covers a fixed distance, so it behaves the same on slow devices.
+- **Scanner map** (Tab, or the MAP touch button): fills in as you explore (a radius round you plus each room you enter) and marks the exit, salvage, O₂, health, data logs, caches and fuel drums you've seen, with the percentage of the ship mapped.
+- **Explosive fuel drums**: 3–4 per ship, sometimes in pairs. Two hits set one off: area damage to enemies (and you, unless you roll through it), cracked walls in the blast give way, and nearby drums chain. Hostile shots can set them off too.
+- **Supply drops**: enemies sometimes drop O₂/power or health on top of salvage, more often when you're low, leaning towards whatever you need. Crawlers hatched from egg sacs never drop supplies.
+- **Ship conditions**: each derelict rolls one from its seed: Quiet, Power failure, Hull breach, Rich manifest, Hardened security or Scanner jammed. Shown on boarding, in the HUD and on the daily card.
+- **Elite hostiles**: gold, double health, a little faster, and always drop extra salvage. About 8% of enemies, 30% on hardened ships. Chosen from the seed.
+- **Achievements**: 13 run goals, each paying salvage once (25–100). Listed under Log with your progress; new ones show on the results screen with a fanfare.
+- New sounds: roll, explosion, scanner, achievement.
+
+### Fixed
+- Grav pulses and blasts that killed one enemy could skip the next enemy in the list.
+
+### Notes
+- Drums use their own random stream, like health packs, so every existing seed keeps the same layout; tests check it.
+
+## [0.5.3] — 2026-10-09
 
 ### Added
 - Health packs: three on every ship, each in a different room and at least 8 tiles from the start. Each restores 35 health; the robot finds green repair kits instead. They glow in the dark, and if you're already at full health you walk over them and they stay put for later.

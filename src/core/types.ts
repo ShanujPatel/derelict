@@ -31,7 +31,9 @@ export const SHIP_TYPES: readonly ShipType[] = ['freighter', 'research'];
 export type EnemyKind = 'drone' | 'turret' | 'crawler' | 'spitter' | 'egg' | 'raider' | 'brute';
 /** Things to pick up or open. */
 export type ItemKind = 'oxygen' | 'salvage' | 'cache' | 'datalog' | 'medkit';
-export type SpawnKind = EnemyKind | ItemKind;
+/** Hazards: explosive fuel drums (v0.6). */
+export type HazardKind = 'drum';
+export type SpawnKind = EnemyKind | ItemKind | HazardKind;
 
 export const ENEMY_KINDS: readonly EnemyKind[] = ['drone', 'turret', 'crawler', 'spitter', 'egg', 'raider', 'brute'];
 

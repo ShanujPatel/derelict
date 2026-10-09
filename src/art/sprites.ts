@@ -185,6 +185,23 @@ export const OXYGEN: PixelSprite = {
   ],
 };
 
+/** Explosive fuel drum: red with a hazard band. Shoot it. */
+export const FUEL_DRUM: PixelSprite = {
+  palette: { k: '#1a0a08', r: '#c8331f', d: '#8e2214', h: '#ff6a4a', y: '#ffd166', b: '#222' },
+  rows: [
+    '.kkkkkk.',
+    'kddrrrdk',
+    'kdrhrrdk',
+    'kdrhrrdk',
+    'kybybybk',
+    'kbybybyk',
+    'kdrhrrdk',
+    'kdrrrrdk',
+    'kddrrddk',
+    '.kkkkkk.',
+  ],
+};
+
 /** Health pack: a white case with a red cross. */
 export const MEDKIT: PixelSprite = {
   palette: { k: '#2a1015', w: '#eef0f4', g: '#b8bec9', r: '#e8283d', h: '#ff8a96' },
