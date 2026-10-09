@@ -231,8 +231,10 @@ revoke all on public.player_totals from anon, authenticated;
 -- Adds one finished run to your totals. p_run is the run report as JSON:
 --   { extracted, salvage, durationMs, depth, kills: { drone: 3, ... }, elites, bounties, boss, bossMs }
 -- Same light checks as src/core/hallOfFame.ts.
+-- v1.1 returns what the run added to your clan, so the old version (returning nothing) is dropped first.
+drop function if exists public.submit_run(uuid, jsonb);
 create or replace function public.submit_run(p_player uuid, p_run jsonb)
-returns void
+returns jsonb
 language plpgsql
 security definer
 set search_path = public
@@ -252,6 +254,7 @@ declare
   v_n         integer;
   v_total     integer := 0;
   v_runs      integer;
+  v_clan      bigint;
 begin
   if p_player is null or not exists (select 1 from players where player_id = p_player) then
     raise exception 'pick a name first' using errcode = '22023';
@@ -321,6 +324,23 @@ begin
     -- Raising rolls the whole update back.
     raise exception 'too many runs today' using errcode = '22023';
   end if;
+
+  -- v1.1: the run also counts for your clan, this week and all time.
+  select m.clan_id into v_clan from clan_members m where m.player_id = p_player;
+  if v_clan is null then
+    return null;
+  end if;
+  insert into clan_scores as c (clan_id, player_id, period, salvage, runs, kills, bosses)
+  select v_clan, p_player, period,
+         case when v_extracted then v_salvage else 0 end, 1, v_total,
+         case when v_extracted and v_boss is not null then 1 else 0 end
+  from unnest(array[to_char(now() at time zone 'utc', 'IYYY-"W"IW'), 'all']) as period
+  on conflict (clan_id, player_id, period) do update set
+    salvage = c.salvage + excluded.salvage,
+    runs    = c.runs + 1,
+    kills   = c.kills + excluded.kills,
+    bosses  = c.bosses + excluded.bosses;
+  return clan_week_summary(v_clan, case when v_extracted then v_salvage else 0 end);
 end;
 $$;
 
@@ -689,3 +709,453 @@ grant execute on function public.submit_ghost(date, uuid, integer, integer, text
 grant execute on function public.get_daily_ghost(date) to anon, authenticated;
 grant execute on function public.submit_weekly(text, text, uuid, text, text, text, integer, integer, integer) to anon, authenticated;
 grant execute on function public.get_weekly_board(text, uuid, integer) to anon, authenticated;
+
+-- ============================================================ v1.1: clans
+
+-- A clan: name and tag are unique (ignoring case), the founder runs it, and
+-- members join with the invite code (or straight from the list if it's open).
+create table if not exists public.clans (
+  clan_id     bigint generated always as identity primary key,
+  name        text        not null check (name ~ '^[A-Za-z0-9 _''-]{3,20}$'),
+  tag         text        not null check (tag ~ '^[A-Z0-9]{2,4}$'),
+  leader_id   uuid        not null,
+  is_open     boolean     not null,
+  invite_code text        not null,
+  created_at  timestamptz not null default now()
+);
+create unique index if not exists clans_name_key on public.clans (lower(name));
+create unique index if not exists clans_tag_key on public.clans (tag);
+create unique index if not exists clans_invite_key on public.clans (invite_code);
+
+-- One clan per player.
+create table if not exists public.clan_members (
+  player_id  uuid        primary key,
+  clan_id    bigint      not null references public.clans (clan_id) on delete cascade,
+  joined_at  timestamptz not null default now()
+);
+create index if not exists clan_members_clan on public.clan_members (clan_id);
+
+-- What each player added to a clan while a member, per ISO week and all time
+-- ('all'). Rows stay when a player leaves: what they earned stays with the clan.
+create table if not exists public.clan_scores (
+  clan_id    bigint  not null references public.clans (clan_id) on delete cascade,
+  player_id  uuid    not null,
+  period     text    not null check (period = 'all' or period ~ '^[0-9]{4}-W[0-9]{2}$'),
+  salvage    bigint  not null default 0,
+  runs       integer not null default 0,
+  kills      integer not null default 0,
+  bosses     integer not null default 0,
+  primary key (clan_id, player_id, period)
+);
+
+-- After leaving a clan you wait a day before joining or founding another.
+alter table public.players add column if not exists clan_left_at timestamptz;
+
+alter table public.clans enable row level security;
+alter table public.clan_members enable row level security;
+alter table public.clan_scores enable row level security;
+revoke all on public.clans from anon, authenticated;
+revoke all on public.clan_members from anon, authenticated;
+revoke all on public.clan_scores from anon, authenticated;
+
+-- Words a clan name or tag can't contain (a light filter; rename or delete by hand if one slips through).
+create or replace function public.clan_name_blocked(p_text text)
+returns boolean
+language sql
+immutable
+as $$
+  select exists (
+    select 1 from unnest(array['fuck','shit','cunt','nigg','fag','rape','nazi','hitler','kkk','whore','slut','bitch','dick','cock','porn','retard']) w
+    where position(w in lower(regexp_replace(coalesce(p_text, ''), '[^A-Za-z]', '', 'g'))) > 0
+  );
+$$;
+
+-- A fresh invite code like 'RUST-7KQ2' (no 0/O or 1/I).
+create or replace function public.clan_invite_code(p_tag text)
+returns text
+language plpgsql
+volatile
+as $$
+declare
+  v_alphabet text := 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
+  v_code     text;
+begin
+  loop
+    v_code := p_tag || '-' || (select string_agg(substr(v_alphabet, 1 + floor(random() * 32)::int, 1), '') from generate_series(1, 4));
+    exit when not exists (select 1 from clans where invite_code = v_code);
+  end loop;
+  return v_code;
+end;
+$$;
+
+-- This week's total and rank for a clan, plus what a run just added.
+create or replace function public.clan_week_summary(p_clan bigint, p_added integer)
+returns jsonb
+language sql
+stable
+security definer
+set search_path = public
+as $$
+  with week as (select to_char(now() at time zone 'utc', 'IYYY-"W"IW') as w),
+  totals as (
+    select s.clan_id, sum(s.salvage) as salvage
+    from clan_scores s, week
+    where s.period = week.w
+    group by s.clan_id
+  ),
+  ranked as (select t.clan_id, t.salvage, rank() over (order by t.salvage desc) as rnk from totals t)
+  select jsonb_build_object(
+    'tag', c.tag,
+    'name', c.name,
+    'added', p_added,
+    'weekSalvage', coalesce(r.salvage, 0),
+    'weekRank', r.rnk
+  )
+  from clans c left join ranked r on r.clan_id = c.clan_id
+  where c.clan_id = p_clan;
+$$;
+
+create or replace function public.clan_check_name(p_name text, p_tag text)
+returns void
+language plpgsql
+as $$
+begin
+  if p_name !~ '^[A-Za-z0-9 _''-]{3,20}$' or btrim(p_name) <> p_name then
+    raise exception 'clan name must be 3-20 letters, numbers, spaces, _ - or ''' using errcode = '22023';
+  end if;
+  if p_tag !~ '^[A-Z0-9]{2,4}$' then
+    raise exception 'tag must be 2-4 letters or numbers' using errcode = '22023';
+  end if;
+  if clan_name_blocked(p_name) or clan_name_blocked(p_tag) then
+    raise exception 'pick a different name' using errcode = '22023';
+  end if;
+end;
+$$;
+
+-- Found a clan. You must have a claimed name, not be in a clan, and not have left one in the last day.
+create or replace function public.create_clan(p_player uuid, p_name text, p_tag text, p_open boolean)
+returns jsonb
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  v_name text := regexp_replace(btrim(coalesce(p_name, '')), '\s+', ' ', 'g');
+  v_tag  text := upper(btrim(coalesce(p_tag, '')));
+  v_clan bigint;
+begin
+  if p_open is null then
+    raise exception 'choose open or invite only' using errcode = '22023';
+  end if;
+  perform clan_join_allowed(p_player);
+  perform clan_check_name(v_name, v_tag);
+  if exists (select 1 from clans where lower(name) = lower(v_name)) then
+    raise exception 'clan name taken' using errcode = '22023';
+  end if;
+  if exists (select 1 from clans where tag = v_tag) then
+    raise exception 'tag taken' using errcode = '22023';
+  end if;
+  insert into clans (name, tag, leader_id, is_open, invite_code)
+  values (v_name, v_tag, p_player, p_open, clan_invite_code(v_tag))
+  returning clan_id into v_clan;
+  insert into clan_members (player_id, clan_id) values (p_player, v_clan);
+  return get_my_clan(p_player);
+exception when unique_violation then
+  raise exception 'clan name or tag taken' using errcode = '22023';
+end;
+$$;
+
+-- Raises unless this player may join or found a clan right now.
+create or replace function public.clan_join_allowed(p_player uuid)
+returns void
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  v_left timestamptz;
+begin
+  if p_player is null or not exists (select 1 from players where player_id = p_player) then
+    raise exception 'pick a name first' using errcode = '22023';
+  end if;
+  if exists (select 1 from clan_members where player_id = p_player) then
+    raise exception 'leave your clan first' using errcode = '22023';
+  end if;
+  select clan_left_at into v_left from players where player_id = p_player;
+  if v_left is not null and v_left > now() - interval '1 day' then
+    raise exception 'you left a clan recently: wait a day before joining another' using errcode = '22023';
+  end if;
+end;
+$$;
+
+-- Join with an invite code, or by clan id if the clan is open. Clans hold 15 at most.
+create or replace function public.join_clan(p_player uuid, p_code text default null, p_clan bigint default null)
+returns jsonb
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  v_clan bigint;
+begin
+  perform clan_join_allowed(p_player);
+  if p_code is not null and btrim(p_code) <> '' then
+    select clan_id into v_clan from clans where invite_code = upper(btrim(p_code));
+    if v_clan is null then
+      raise exception 'no clan with that invite code' using errcode = '22023';
+    end if;
+  else
+    select clan_id into v_clan from clans where clan_id = p_clan and is_open;
+    if v_clan is null then
+      raise exception 'that clan is invite only' using errcode = '22023';
+    end if;
+  end if;
+  -- Lock the clan row so two players can't take the last place at once.
+  perform 1 from clans where clan_id = v_clan for update;
+  if (select count(*) from clan_members where clan_id = v_clan) >= 15 then
+    raise exception 'that clan is full' using errcode = '22023';
+  end if;
+  insert into clan_members (player_id, clan_id) values (p_player, v_clan);
+  return get_my_clan(p_player);
+end;
+$$;
+
+-- Removes a member; if it was the leader, the longest-standing member takes over,
+-- and a clan with nobody left is deleted.
+create or replace function public.clan_remove_member(p_clan bigint, p_target uuid)
+returns void
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  v_next uuid;
+begin
+  delete from clan_members where player_id = p_target and clan_id = p_clan;
+  if exists (select 1 from clans where clan_id = p_clan and leader_id = p_target) then
+    select player_id into v_next from clan_members where clan_id = p_clan order by joined_at, player_id limit 1;
+    if v_next is null then
+      delete from clans where clan_id = p_clan;
+    else
+      update clans set leader_id = v_next where clan_id = p_clan;
+    end if;
+  end if;
+end;
+$$;
+
+create or replace function public.leave_clan(p_player uuid)
+returns void
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  v_clan bigint;
+begin
+  select clan_id into v_clan from clan_members where player_id = p_player;
+  if v_clan is null then
+    raise exception 'you are not in a clan' using errcode = '22023';
+  end if;
+  perform clan_remove_member(v_clan, p_player);
+  update players set clan_left_at = now() where player_id = p_player;
+end;
+$$;
+
+-- Leader tools: kick a member, hand over leadership, switch open/invite only, or make a new invite code.
+create or replace function public.manage_clan(
+  p_player    uuid,
+  p_action    text,
+  p_target    text    default null,
+  p_open      boolean default null
+)
+returns jsonb
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  v_clan   bigint;
+  v_target uuid;
+begin
+  select c.clan_id into v_clan from clans c where c.leader_id = p_player;
+  if v_clan is null then
+    raise exception 'only the clan leader can do that' using errcode = '22023';
+  end if;
+  if p_action in ('kick', 'leader') then
+    select m.player_id into v_target
+    from clan_members m join players p on p.player_id = m.player_id
+    where m.clan_id = v_clan and p.callsign = upper(btrim(coalesce(p_target, '')));
+    if v_target is null or v_target = p_player then
+      raise exception 'no such member' using errcode = '22023';
+    end if;
+  end if;
+  case p_action
+    when 'kick' then
+      -- Kicked players can join another clan straight away.
+      perform clan_remove_member(v_clan, v_target);
+    when 'leader' then
+      update clans set leader_id = v_target where clan_id = v_clan;
+    when 'open' then
+      if p_open is null then
+        raise exception 'choose open or invite only' using errcode = '22023';
+      end if;
+      update clans set is_open = p_open where clan_id = v_clan;
+    when 'code' then
+      update clans set invite_code = clan_invite_code(tag) where clan_id = v_clan;
+    else
+      raise exception 'unknown action' using errcode = '22023';
+  end case;
+  return get_my_clan(p_player);
+end;
+$$;
+
+-- Your clan: details, the invite code (members only), this week's total and rank,
+-- last week's rank, and each current member's contribution this week and all time.
+create or replace function public.get_my_clan(p_player uuid)
+returns jsonb
+language plpgsql
+stable
+security definer
+set search_path = public
+as $$
+declare
+  v_clan bigint;
+  v_week text := to_char(now() at time zone 'utc', 'IYYY-"W"IW');
+  v_last text := to_char(now() at time zone 'utc' - interval '7 days', 'IYYY-"W"IW');
+  v_out  jsonb;
+begin
+  select clan_id into v_clan from clan_members where player_id = p_player;
+  if v_clan is null then
+    return null;
+  end if;
+  select jsonb_build_object(
+    'id', c.clan_id,
+    'name', c.name,
+    'tag', c.tag,
+    'open', c.is_open,
+    'inviteCode', c.invite_code,
+    'isLeader', c.leader_id = p_player,
+    'week', v_week,
+    'weekSalvage', coalesce((select sum(salvage) from clan_scores where clan_id = c.clan_id and period = v_week), 0),
+    'allSalvage', coalesce((select sum(salvage) from clan_scores where clan_id = c.clan_id and period = 'all'), 0),
+    'weekRank', (select r.rnk from (
+        select clan_id, rank() over (order by sum(salvage) desc) as rnk
+        from clan_scores where period = v_week group by clan_id) r where r.clan_id = c.clan_id),
+    'lastWeekRank', (select r.rnk from (
+        select clan_id, rank() over (order by sum(salvage) desc) as rnk
+        from clan_scores where period = v_last group by clan_id having sum(salvage) > 0) r where r.clan_id = c.clan_id),
+    'lastWeek', v_last,
+    'members', (
+      select coalesce(jsonb_agg(jsonb_build_object(
+        'callsign', p.callsign,
+        'leader', m.player_id = c.leader_id,
+        'you', m.player_id = p_player,
+        'weekSalvage', coalesce(w.salvage, 0),
+        'allSalvage', coalesce(a.salvage, 0),
+        'runs', coalesce(a.runs, 0)
+      ) order by coalesce(w.salvage, 0) desc, coalesce(a.salvage, 0) desc, p.callsign), '[]'::jsonb)
+      from clan_members m
+      join players p on p.player_id = m.player_id
+      left join clan_scores w on w.clan_id = c.clan_id and w.player_id = m.player_id and w.period = v_week
+      left join clan_scores a on a.clan_id = c.clan_id and a.player_id = m.player_id and a.period = 'all'
+      where m.clan_id = c.clan_id
+    )
+  ) into v_out
+  from clans c where c.clan_id = v_clan;
+  return v_out;
+end;
+$$;
+
+-- The clan board: every clan ranked by salvage this week ('week') or all time ('all').
+create or replace function public.get_clan_board(p_scope text default 'week', p_player uuid default null, p_limit integer default 25)
+returns table (rank bigint, clan_id bigint, name text, tag text, members bigint, is_open boolean, salvage bigint, runs bigint, bosses bigint, is_yours boolean)
+language plpgsql
+stable
+security definer
+set search_path = public
+as $$
+declare
+  v_period text := case when p_scope = 'all' then 'all' else to_char(now() at time zone 'utc', 'IYYY-"W"IW') end;
+  v_mine   bigint;
+begin
+  if p_scope not in ('week', 'all') then
+    raise exception 'unknown scope' using errcode = '22023';
+  end if;
+  select m.clan_id into v_mine from clan_members m where m.player_id = p_player;
+  return query
+  with totals as (
+    select s.clan_id, sum(s.salvage)::bigint as salvage, sum(s.runs)::bigint as runs, sum(s.bosses)::bigint as bosses
+    from clan_scores s where s.period = v_period group by s.clan_id
+  ),
+  ranked as (
+    select c.clan_id, c.name, c.tag, c.is_open,
+           coalesce(t.salvage, 0) as salvage, coalesce(t.runs, 0) as runs, coalesce(t.bosses, 0) as bosses,
+           rank() over (order by coalesce(t.salvage, 0) desc) as rnk,
+           row_number() over (order by coalesce(t.salvage, 0) desc, c.created_at) as pos
+    from clans c left join totals t on t.clan_id = c.clan_id
+  )
+  select r.rnk, r.clan_id, r.name, r.tag,
+         (select count(*) from clan_members m where m.clan_id = r.clan_id),
+         r.is_open, r.salvage, r.runs, r.bosses, coalesce(r.clan_id = v_mine, false)
+  from ranked r
+  where r.pos <= least(greatest(coalesce(p_limit, 25), 1), 100) or r.clan_id = v_mine
+  order by r.pos;
+end;
+$$;
+
+-- Open clans with room, for the browse list (optionally filtered by name or tag).
+create or replace function public.browse_clans(p_query text default null, p_limit integer default 20)
+returns table (clan_id bigint, name text, tag text, members bigint, week_salvage bigint)
+language sql
+stable
+security definer
+set search_path = public
+as $$
+  select c.clan_id, c.name, c.tag,
+         (select count(*) from clan_members m where m.clan_id = c.clan_id) as members,
+         coalesce((select sum(s.salvage) from clan_scores s
+                   where s.clan_id = c.clan_id and s.period = to_char(now() at time zone 'utc', 'IYYY-"W"IW')), 0)::bigint
+  from clans c
+  where c.is_open
+    and (select count(*) from clan_members m where m.clan_id = c.clan_id) < 15
+    and (coalesce(btrim(p_query), '') = '' or lower(c.name) like '%' || lower(btrim(p_query)) || '%' or c.tag = upper(btrim(p_query)))
+  order by 5 desc, members desc, c.created_at
+  limit least(greatest(coalesce(p_limit, 20), 1), 50);
+$$;
+
+-- Clan tags for the names on a board, so boards can show [TAG] NAME.
+create or replace function public.get_clan_tags(p_callsigns text[])
+returns table (callsign text, tag text)
+language sql
+stable
+security definer
+set search_path = public
+as $$
+  select p.callsign, c.tag
+  from players p
+  join clan_members m on m.player_id = p.player_id
+  join clans c on c.clan_id = m.clan_id
+  where p.callsign = any (p_callsigns[1:120]);
+$$;
+
+revoke all on function public.create_clan(uuid, text, text, boolean) from public;
+revoke all on function public.join_clan(uuid, text, bigint) from public;
+revoke all on function public.leave_clan(uuid) from public;
+revoke all on function public.manage_clan(uuid, text, text, boolean) from public;
+revoke all on function public.get_my_clan(uuid) from public;
+revoke all on function public.get_clan_board(text, uuid, integer) from public;
+revoke all on function public.browse_clans(text, integer) from public;
+revoke all on function public.get_clan_tags(text[]) from public;
+revoke all on function public.clan_week_summary(bigint, integer) from public;
+revoke all on function public.clan_remove_member(bigint, uuid) from public;
+revoke all on function public.clan_join_allowed(uuid) from public;
+revoke all on function public.clan_invite_code(text) from public;
+revoke all on function public.clan_check_name(text, text) from public;
+grant execute on function public.create_clan(uuid, text, text, boolean) to anon, authenticated;
+grant execute on function public.join_clan(uuid, text, bigint) to anon, authenticated;
+grant execute on function public.leave_clan(uuid) to anon, authenticated;
+grant execute on function public.manage_clan(uuid, text, text, boolean) to anon, authenticated;
+grant execute on function public.get_my_clan(uuid) to anon, authenticated;
+grant execute on function public.get_clan_board(text, uuid, integer) to anon, authenticated;
+grant execute on function public.browse_clans(text, integer) to anon, authenticated;
+grant execute on function public.get_clan_tags(text[]) to anon, authenticated;

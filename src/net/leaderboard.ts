@@ -6,6 +6,15 @@ import {
   type WeeklySubmission,
 } from '../core/leaderboard';
 import { GHOST, decodeGhost, type Ghost } from '../core/ghost';
+import {
+  checkClanName,
+  checkClanTag,
+  parseMyClan,
+  type ClanBoardRow,
+  type ClanRunSummary,
+  type MyClan,
+  type OpenClan,
+} from '../core/clans';
 import { BOARD_IDS, checkRunReport, type BoardId, type HallEntry, type HallRow, type RunReport } from '../core/hallOfFame';
 
 /**
@@ -34,7 +43,8 @@ export interface LeaderboardClient {
   /** Reserves a name for this player. False if someone else already has it. */
   claimName(playerId: string, name: string): Promise<boolean>;
   /** Adds a finished run to the player's all-time totals. */
-  submitRun(playerId: string, report: RunReport): Promise<void>;
+  /** Adds a finished run to your totals; returns what it added to your clan, if you're in one. */
+  submitRun(playerId: string, report: RunReport): Promise<ClanRunSummary | null>;
   /** One all-time board: the top players plus your row. */
   hallOfFame(board: BoardId, playerId: string, limit?: number): Promise<HallEntry[]>;
   /** The RANKS table: every stat per player, sorted by one column. */
@@ -46,6 +56,20 @@ export interface LeaderboardClient {
   submitGhost(day: string, playerId: string, score: number, durationMs: number, ghost: string): Promise<boolean>;
   /** The ghost to race today: the best run that has one. */
   dailyGhost(day: string): Promise<DailyGhost | null>;
+  // ---- clans (v1.1)
+  myClan(playerId: string): Promise<MyClan | null>;
+  createClan(playerId: string, name: string, tag: string, open: boolean): Promise<MyClan>;
+  /** Join by invite code, or an open clan by id. */
+  joinClan(playerId: string, by: { code: string } | { id: number }): Promise<MyClan>;
+  leaveClan(playerId: string): Promise<void>;
+  manageClan(
+    playerId: string,
+    action: { kind: 'kick' | 'leader'; callsign: string } | { kind: 'open'; open: boolean } | { kind: 'code' },
+  ): Promise<MyClan>;
+  clanBoard(scope: 'week' | 'all', playerId: string, limit?: number): Promise<ClanBoardRow[]>;
+  browseClans(query?: string): Promise<OpenClan[]>;
+  /** Clan tags for names shown on a board. */
+  clanTags(callsigns: string[]): Promise<Record<string, string>>;
 }
 
 export interface DailyGhost {
@@ -122,7 +146,86 @@ export function createLeaderboardClient(
     async submitRun(playerId, report) {
       const check = checkRunReport(report);
       if (!check.ok) throw new LeaderboardError(check.reason);
-      await call<null>('submit_run', { p_player: playerId, p_run: report });
+      const r = await call<Record<string, unknown> | null>('submit_run', { p_player: playerId, p_run: report });
+      if (!r || typeof r !== 'object' || !r.tag) return null;
+      return {
+        tag: String(r.tag),
+        name: String(r.name ?? ''),
+        added: Number(r.added ?? 0),
+        weekSalvage: Number(r.weekSalvage ?? 0),
+        weekRank: r.weekRank === null || r.weekRank === undefined ? null : Number(r.weekRank),
+      };
+    },
+
+    async myClan(playerId) {
+      return parseMyClan(await call<unknown>('get_my_clan', { p_player: playerId }));
+    },
+
+    async createClan(playerId, name, tag, open) {
+      const n = checkClanName(name);
+      if (!n.ok) throw new LeaderboardError(n.reason);
+      const t = checkClanTag(tag);
+      if (!t.ok) throw new LeaderboardError(t.reason);
+      const clan = parseMyClan(await call<unknown>('create_clan', { p_player: playerId, p_name: n.value, p_tag: t.value, p_open: open }));
+      if (!clan) throw new LeaderboardError('Clan not created');
+      return clan;
+    },
+
+    async joinClan(playerId, by) {
+      const body = 'code' in by ? { p_player: playerId, p_code: by.code.trim(), p_clan: null } : { p_player: playerId, p_code: null, p_clan: by.id };
+      const clan = parseMyClan(await call<unknown>('join_clan', body));
+      if (!clan) throw new LeaderboardError('Could not join');
+      return clan;
+    },
+
+    async leaveClan(playerId) {
+      await call<null>('leave_clan', { p_player: playerId });
+    },
+
+    async manageClan(playerId, action) {
+      const body = {
+        p_player: playerId,
+        p_action: action.kind,
+        p_target: 'callsign' in action ? action.callsign : null,
+        p_open: 'open' in action ? action.open : null,
+      };
+      const clan = parseMyClan(await call<unknown>('manage_clan', body));
+      if (!clan) throw new LeaderboardError('Clan not found');
+      return clan;
+    },
+
+    async clanBoard(scope, playerId, limit = 25) {
+      const rows = await call<Record<string, unknown>[]>('get_clan_board', { p_scope: scope, p_player: playerId || null, p_limit: limit });
+      return (rows ?? []).map((r) => ({
+        rank: Number(r.rank),
+        id: Number(r.clan_id),
+        name: String(r.name),
+        tag: String(r.tag),
+        members: Number(r.members),
+        open: r.is_open === true,
+        salvage: Number(r.salvage),
+        runs: Number(r.runs),
+        bosses: Number(r.bosses),
+        isYours: r.is_yours === true,
+      }));
+    },
+
+    async browseClans(query = '') {
+      const rows = await call<Record<string, unknown>[]>('browse_clans', { p_query: query || null, p_limit: 20 });
+      return (rows ?? []).map((r) => ({
+        id: Number(r.clan_id),
+        name: String(r.name),
+        tag: String(r.tag),
+        members: Number(r.members),
+        weekSalvage: Number(r.week_salvage),
+      }));
+    },
+
+    async clanTags(callsigns) {
+      const names = [...new Set(callsigns)].slice(0, 120);
+      if (!names.length) return {};
+      const rows = await call<{ callsign: string; tag: string }[]>('get_clan_tags', { p_callsigns: names });
+      return Object.fromEntries((rows ?? []).map((r) => [r.callsign, r.tag]));
     },
 
     async hallOfFame(board, playerId, limit = 20) {

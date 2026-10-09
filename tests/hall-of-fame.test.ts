@@ -68,7 +68,7 @@ describe('hall of fame client', () => {
   it('posts a run report to submit_run and copes with an empty reply', async () => {
     const fetchMock = vi.fn(async () => new Response(null, { status: 204 }));
     const c = createLeaderboardClient(config, fetchMock);
-    await expect(c.submitRun(PLAYER, report())).resolves.toBeUndefined();
+    await expect(c.submitRun(PLAYER, report())).resolves.toBeNull();
     const [url, init] = fetchMock.mock.calls[0] as unknown as [string, RequestInit];
     expect(url).toBe('https://x.supabase.co/rest/v1/rpc/submit_run');
     expect(JSON.parse(init.body as string)).toMatchObject({ p_player: PLAYER, p_run: { salvage: 200, kills: { drone: 4 } } });

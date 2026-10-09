@@ -8,7 +8,7 @@ A real-time, top-down sci-fi roguelike that runs in the browser. Board abandoned
 
 ![Gameplay: a freighter firefight, a mining hauler's mines and cutting lasers, and the Hollow Captain](docs/gameplay.gif)
 
-Three ship types, three bosses, an online daily and weekly board with ghost replays, an all-time hall of fame, and every pixel and sound made in code. Installs as an app and plays offline.
+Three ship types, three bosses, clans, an online daily and weekly board with ghost replays, an all-time hall of fame, and every pixel and sound made in code. Installs as an app and plays offline.
 
 ## How to play
 
@@ -95,6 +95,10 @@ Progress saves in your browser. Use **Log → Copy save code** to move it to ano
 
 **Hall of fame** (**RANKS** tab): an all-time table of the best salvagers, sorted by total salvage banked. Each row shows a player's biggest haul, ships cleared, deepest dive, longest daily streak, fastest boss kills, and kills overall, of elites, of bounties and of each hostile type; tap any column heading to sort by it. Every run you finish adds to your totals once your name is claimed (assist mode runs don't count). If you run your own board, re-run `docs/supabase.sql` after updating to add it.
 
+**Clans** (**CREW** tab): found a clan with a name and a 2–4 letter tag, choosing whether it's **open** (anyone can join from the list) or **invite only** (members share a code like `RUST-7KQ2`). Up to 15 salvagers per clan, one clan each. Every member's banked salvage counts for the clan, but only while they're in it: what you earned stays with the clan if you leave, and there's a day's wait before joining another. Clans race on a **weekly season** (resetting with the Weekly Challenge) and an all-time board under **RANKS → Clans**; the top three each week earn their members a banner trophy colour. Each clan has a weekly goal that grows with its size (+100 salvage each when it's reached), and the leader can kick members, hand over leadership, switch open or invite only, and make a new invite code. Clan tags show next to names on every board.
+
+<img src="docs/screenshot-clans.png" alt="A clan card: weekly total, goal, invite code and members" width="480">
+
 **Seeds:** every ship comes from a seed shown in the top-right corner. Share a ship with `?seed=YOURSEED` (add `&ship=research` or `&ship=mining`), or play today's shared ship with `?daily`.
 
 **Seed explorer** ([map.html](https://ShanujPatel.github.io/derelict/map.html)): type any seed, or pick today's daily or this week's challenge, and see the whole deck the game will build: every room, hostile, crate, drum, shock floor, ore vein, the bounty target, the exit and the lift, plus a summary of what's aboard. Tap a ship in **Log → Recent runs** to open it there. It's a separate small page without the game engine, so it loads instantly.
@@ -169,6 +173,7 @@ See the full [game design document](docs/GDD.md).
 - [x] **v0.8** Deep salvage: gamepad, deep dive lifts, weekly challenge, arc caster, sentry, mimics, stalkers, shock floors, bounties, combos, codex chapter 2, tips, field manual, assist mode
 - [x] **v0.9** All-time hall of fame: salvage, records, boss times and kills by hostile type
 - [x] **v1.0** Mining haulers (sappers, sweeper lasers, ore veins), the Hollow Captain, codex chapter 3, weekly online board, daily ghost replays, seed explorer, installable offline app, faster loading
+- [x] **v1.1** Clans: open or invite-only crews of up to 15, weekly and all-time clan boards, weekly goals, tags on every board
 - [ ] **Later** Codex chapter 4 (the survey ship *Caldera*), ghost races against friends, more bosses
 
 ## Licence

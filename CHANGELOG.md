@@ -1,5 +1,19 @@
 # Changelog
 
+## [1.1.0] — Unreleased: Clans
+
+### Added
+- **Clans** (CREW tab): found one with a name (3–20 characters) and a 2–4 letter tag; the founder chooses open (listed for anyone to join) or invite only (join with a code like `RUST-7KQ2`). One clan per player, 15 members at most. A light blocked-words filter on names and tags.
+- Clan score is the **total of all members' banked salvage while they're members**; it stays with the clan when someone leaves. Leaving means a 24-hour wait before joining another clan (being kicked doesn't).
+- **Clan boards** in RANKS → Clans: this week (resets with the Weekly Challenge) and all time, with members, runs and boss kills. Your clan is highlighted.
+- **Clan card**: weekly and all-time totals, this week's rank and last week's, a weekly goal (2,500 salvage per member, at least 5,000) that pays each member +100 once reached, the invite code with a copy button, and members' contributions this week and all time.
+- **Leader tools**: kick (two taps), hand over leadership, switch open or invite only, new invite code. If the leader leaves, the longest-standing member takes over; an empty clan is deleted.
+- **Clan tags** next to names on the daily, weekly and hall of fame boards, and a "+212 to [RUST] · clan #3 this week" line on the results screen.
+- Achievement *Podium crew* (your clan finishes a week in the top 3) with *Clan banner* trophy colours for both characters.
+
+### Upgrading
+- Re-run `docs/supabase.sql` in the Supabase SQL Editor. `submit_run` now returns what the run added to your clan, so it is dropped and recreated.
+
 ## [1.0.0] — Unreleased: The Saw-Tooth
 
 ### Added

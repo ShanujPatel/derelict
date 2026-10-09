@@ -30,7 +30,7 @@ beforeAll(async () => {
 }, 60_000);
 
 beforeEach(async () => {
-  await db.exec('reset role; delete from daily_scores; delete from players; delete from player_totals; delete from weekly_scores;');
+  await db.exec('reset role; delete from daily_scores; delete from players; delete from player_totals; delete from weekly_scores; delete from clans; delete from clan_members; delete from clan_scores;');
   await db.exec('set role anon');
 });
 
@@ -340,6 +340,148 @@ describe('supabase.sql', () => {
       ]);
       const rows = (await db.query<Record<string, unknown>>('select * from get_hall_table($1, $2, 25)', ['captain', P1])).rows;
       expect(rows[0]).toMatchObject({ callsign: 'NOVA', sapper: 3, sweeper: 2, captain: 95_000, kills: 5 });
+    });
+  });
+
+  describe('v1.1 clans', () => {
+    const P3 = '33333333-3333-4333-8333-333333333333';
+    const q = async <T = Record<string, unknown>>(sql: string, args: unknown[] = []) => (await db.query<T>(sql, args)).rows;
+    const one = async (sql: string, args: unknown[] = []) => Object.values((await q(sql, args))[0] ?? {})[0] as Record<string, unknown> | null;
+    const claim = (player: string, name: string) => db.query('select claim_callsign($1, $2)', [player, name]);
+    const create = (player: string, name: string, tag: string, open: boolean | null = true) =>
+      one('select create_clan($1, $2, $3, $4)', [player, name, tag, open]);
+    const join = (player: string, code: string | null, clan: number | null = null) => one('select join_clan($1, $2, $3)', [player, code, clan]);
+    const run = (player: string, salvage: number, extracted = true) =>
+      one('select submit_run($1, $2)', [
+        player,
+        JSON.stringify({ extracted, salvage, durationMs: 180_000, depth: 1, kills: { drone: 2 }, elites: 0, bounties: 0 }),
+      ]);
+    const backdateLeave = async (player: string) => {
+      await db.exec('reset role');
+      await db.query(`update players set clan_left_at = now() - interval '2 days' where player_id = $1`, [player]);
+      await db.exec('set role anon');
+    };
+
+    it('creates a clan, joins by code and by the open list, and scores everyone', async () => {
+      await claim(P1, 'NOVA');
+      await claim(P2, 'ACE');
+      await claim(P3, 'VEX');
+      const mine = (await create(P1, 'Rust Raiders', 'rust', true))!;
+      expect(mine).toMatchObject({ name: 'Rust Raiders', tag: 'RUST', open: true, isLeader: true });
+      expect(mine.inviteCode).toMatch(/^RUST-[A-Z2-9]{4}$/);
+      await join(P2, String(mine.inviteCode).toLowerCase());
+      await join(P3, null, Number(mine.id));
+      // Before joining, nothing counted; from now on every member's salvage does.
+      const summary = (await run(P2, 300))!;
+      expect(summary).toMatchObject({ tag: 'RUST', added: 300, weekSalvage: 300, weekRank: 1 });
+      await run(P1, 200);
+      await run(P3, 999, false); // a lost run adds no salvage
+      const clan = (await one('select get_my_clan($1)', [P3]))!;
+      expect(clan).toMatchObject({ weekSalvage: 500, allSalvage: 500, isLeader: false });
+      const members = clan.members as { callsign: string; weekSalvage: number; leader: boolean; you: boolean }[];
+      expect(members.map((m) => [m.callsign, m.weekSalvage, m.leader, m.you])).toEqual([
+        ['ACE', 300, false, false],
+        ['NOVA', 200, true, false],
+        ['VEX', 0, false, true],
+      ]);
+      const tags = await q<{ callsign: string; tag: string }>('select * from get_clan_tags($1)', [['NOVA', 'ACE', 'NOBODY']]);
+      expect(tags.map((t) => t.callsign).sort()).toEqual(['ACE', 'NOVA']);
+    });
+
+    it('ranks clans by the total of all their members, this week and all time', async () => {
+      await claim(P1, 'NOVA');
+      await claim(P2, 'ACE');
+      await claim(P3, 'VEX');
+      const a = (await create(P1, 'Alpha', 'AA'))!;
+      await create(P2, 'Bravo', 'BB', false);
+      await join(P3, String(a.inviteCode));
+      await run(P1, 150);
+      await run(P3, 150);
+      await run(P2, 250);
+      const board = await q<{ rank: number; tag: string; salvage: number; members: number; is_yours: boolean }>('select * from get_clan_board($1, $2, 25)', [
+        'week',
+        P2,
+      ]);
+      expect(board.map((r) => [Number(r.rank), r.tag, Number(r.salvage), Number(r.members), r.is_yours])).toEqual([
+        [1, 'AA', 300, 2, false],
+        [2, 'BB', 250, 1, true],
+      ]);
+      expect((await q('select * from get_clan_board($1, $2, 25)', ['all', null])).length).toBe(2);
+      await expect(q('select * from get_clan_board($1, $2, 25)', ['month', null])).rejects.toThrow('unknown scope');
+      // Only open clans with room are listed.
+      const open = await q<{ tag: string }>('select * from browse_clans($1, 20)', [null]);
+      expect(open.map((r) => r.tag)).toEqual(['AA']);
+    });
+
+    it('enforces names, tags, one clan each, a choice of open or invite only, and the 15 limit', async () => {
+      await claim(P1, 'NOVA');
+      await claim(P2, 'ACE');
+      await expect(create(P1, 'X', 'XX')).rejects.toThrow('clan name');
+      await expect(create(P1, 'Good Name', 'TOOLONG')).rejects.toThrow('tag');
+      await expect(create(P1, 'Shitty Crew', 'SC')).rejects.toThrow('different name');
+      await expect(create(P1, 'Good Name', 'GN', null)).rejects.toThrow('choose open or invite only');
+      await expect(create('44444444-4444-4444-8444-444444444444', 'Nameless', 'NL')).rejects.toThrow('pick a name first');
+      const c = (await create(P1, 'Good Name', 'GN', false))!;
+      await expect(create(P2, 'good name', 'G2')).rejects.toThrow('taken');
+      await expect(create(P2, 'Other', 'GN')).rejects.toThrow('taken');
+      await expect(create(P1, 'Second', 'S2')).rejects.toThrow('leave your clan first');
+      await expect(join(P2, null, Number(c.id))).rejects.toThrow('invite only');
+      await expect(join(P2, 'NOPE-0000')).rejects.toThrow('no clan with that invite code');
+      // Fill it to 15.
+      await db.exec('reset role');
+      for (let i = 0; i < 14; i++) {
+        const id = `55555555-5555-4555-8555-${String(i).padStart(12, '0')}`;
+        await db.query('insert into players (player_id, callsign) values ($1, $2)', [id, `FILL${i}`]);
+        await db.query('insert into clan_members (player_id, clan_id) values ($1, $2)', [id, c.id]);
+      }
+      await db.exec('set role anon');
+      await expect(join(P2, String(c.inviteCode))).rejects.toThrow('full');
+      await expect(q('select * from clans')).rejects.toThrow(/permission denied/);
+      await expect(q('select * from clan_scores')).rejects.toThrow(/permission denied/);
+    });
+
+    it('lets the leader kick, hand over, switch to open and change the code', async () => {
+      await claim(P1, 'NOVA');
+      await claim(P2, 'ACE');
+      await claim(P3, 'VEX');
+      const c = (await create(P1, 'Crew', 'CRW', false))!;
+      await join(P2, String(c.inviteCode));
+      await join(P3, String(c.inviteCode));
+      await expect(one('select manage_clan($1, $2, $3, $4)', [P2, 'kick', 'VEX', null])).rejects.toThrow('only the clan leader');
+      let after = (await one('select manage_clan($1, $2, $3, $4)', [P1, 'kick', 'vex', null]))!;
+      expect((after.members as unknown[]).length).toBe(2);
+      // Kicked players can join another clan straight away.
+      await create(P3, 'Solo', 'SOLO', true);
+      after = (await one('select manage_clan($1, $2, $3, $4)', [P1, 'code', null, null]))!;
+      expect(after.inviteCode).not.toBe(c.inviteCode);
+      after = (await one('select manage_clan($1, $2, $3, $4)', [P1, 'open', null, true]))!;
+      expect(after.open).toBe(true);
+      after = (await one('select manage_clan($1, $2, $3, $4)', [P1, 'leader', 'ACE', null]))!;
+      expect(after.isLeader).toBe(false);
+      expect(((await one('select get_my_clan($1)', [P2]))!).isLeader).toBe(true);
+    });
+
+    it('passes leadership on when the leader leaves, deletes empty clans, and keeps what members earned', async () => {
+      await claim(P1, 'NOVA');
+      await claim(P2, 'ACE');
+      const c = (await create(P1, 'Crew', 'CRW'))!;
+      await join(P2, String(c.inviteCode));
+      await run(P1, 400);
+      await db.query('select leave_clan($1)', [P1]);
+      const left = (await one('select get_my_clan($1)', [P2]))!;
+      expect(left.isLeader).toBe(true);
+      // NOVA's 400 stays with the clan.
+      expect(left.weekSalvage).toBe(400);
+      // A day's wait before joining again.
+      await expect(join(P1, String(c.inviteCode))).rejects.toThrow('wait a day');
+      await backdateLeave(P1);
+      await join(P1, String(c.inviteCode));
+      // Runs while not in a clan don't count anywhere.
+      await db.query('select leave_clan($1)', [P1]);
+      expect(await run(P1, 100)).toBeNull();
+      await db.query('select leave_clan($1)', [P2]);
+      expect(await q('select * from get_clan_board($1, $2, 25)', ['all', null])).toEqual([]);
+      await expect(db.query('select leave_clan($1)', [P2])).rejects.toThrow('not in a clan');
     });
   });
 });

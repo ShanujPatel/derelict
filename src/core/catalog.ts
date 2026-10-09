@@ -185,6 +185,13 @@ export const COSMETICS: Record<CharacterId, { body: ColourOption[]; accent: Colo
         colours: { b: '#7a4fc9', B: '#c9a0ff', d: '#4a2d80' },
         trophy: { achievement: 'mutant', label: 'Extract from a Weekly Challenge' },
       },
+      {
+        id: 'banner',
+        name: 'Clan banner red',
+        cost: 0,
+        colours: { b: '#9e1f2c', B: '#d94a4a', d: '#5c1018' },
+        trophy: { achievement: 'clan-podium', label: 'Clan finishes a week in the top 3' },
+      },
     ],
     accent: [
       { id: 'cyan', name: 'Cyan visor', cost: 0, colours: { v: '#3fa7d6', w: '#d8f6ff' } },
@@ -227,6 +234,13 @@ export const COSMETICS: Record<CharacterId, { body: ColourOption[]; accent: Colo
         cost: 0,
         colours: { s: '#a87a3e', d: '#5a4a3a' },
         trophy: { achievement: 'prospector', label: 'Earn the Prospector achievement' },
+      },
+      {
+        id: 'banner',
+        name: 'Clan banner plating',
+        cost: 0,
+        colours: { s: '#9e1f2c', d: '#5c1018' },
+        trophy: { achievement: 'clan-podium', label: 'Clan finishes a week in the top 3' },
       },
     ],
     accent: [

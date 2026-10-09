@@ -140,7 +140,7 @@ describe('chapter 3 and the Hollow Captain', () => {
     expect(newAchievements(base, []).map((a) => a.id)).toContain('prospector');
     expect(newAchievements({ ...base, bossKilled: 'captain' }, []).map((a) => a.id)).toContain('mutiny');
     expect(newAchievements({ ...base, ship: 'freighter' }, []).map((a) => a.id)).not.toContain('prospector');
-    expect(ACHIEVEMENTS.length).toBe(21);
+    expect(ACHIEVEMENTS.length).toBe(22);
   });
 });
 

@@ -186,6 +186,14 @@ export const ACHIEVEMENTS: readonly Achievement[] = [
     earned: (r) => r.weekly && r.extracted,
   },
   {
+    id: 'clan-podium',
+    name: 'Podium crew',
+    description: 'Be in a clan that finishes a weekly season in the top 3.',
+    reward: 80,
+    // Awarded from the clan card in the hub, not by a run.
+    earned: () => false,
+  },
+  {
     id: 'daily-driver',
     name: 'Daily driver',
     description: 'Extract from a Daily Derelict.',

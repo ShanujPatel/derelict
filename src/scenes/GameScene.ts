@@ -33,7 +33,7 @@ import { NO_COMBO, comboAfterPickup, comboMultiplier, comboTimeLeft, type ComboS
 import { NO_EFFECTS, combineMutators, weekFromSeed, weeklySetup, type Mutator, type MutatorEffects } from '../core/weekly';
 import { BOSSES, CAPTAIN, FOREMAN, MOTHER, type BossId } from '../core/bosses';
 import { BossFight, CaptainFight, ForemanFight, MotherFight, type BossHost } from './boss';
-import { ASSIST, applyRunResult, canBoard, awardAchievements, recordStreak, markTipSeen, recordWeekly, computeRunStats, recordBossKill, recordRun, recordDaily, setClaimedName, type RunStats, type SaveData } from '../core/progression';
+import { ASSIST, applyRunResult, canBoard, setClanCache, awardAchievements, recordStreak, markTipSeen, recordWeekly, computeRunStats, recordBossKill, recordRun, recordDaily, setClaimedName, type RunStats, type SaveData } from '../core/progression';
 import { hashString, type ResolvedSeed } from '../core/seed';
 import { ENEMY_KINDS, Tile, type EnemyKind, type Point } from '../core/types';
 import { checkRunReport, type RunReport } from '../core/hallOfFame';
@@ -1912,7 +1912,22 @@ export class GameScene extends Phaser.Scene implements EnemyWorld, BossHost {
       bossMs: extracted && this.bossDefeated ? Math.round(this.bossDefeated.ms) : null,
     };
     if (!checkRunReport(report).ok) return;
-    leaderboard.submitRun(save.playerId, report).catch(() => undefined);
+    const token = this.runToken;
+    leaderboard
+      .submitRun(save.playerId, report)
+      .then((clan) => {
+        storeSave(setClanCache(loadSave(), clan ? { tag: clan.tag, name: clan.name } : loadSave().clan));
+        // Your clan's share, at the top of the results screen.
+        if (!clan || !extracted || token !== this.runToken || !this.ended) return;
+        const rank = clan.weekRank ? ` · clan #${clan.weekRank} this week` : '';
+        const line = this.add
+          .text(this.scale.width / 2, 14, `+${clan.added} to [${clan.tag}]${rank}`, { ...FONT, fontSize: '10px', color: '#ff9a8a' })
+          .setOrigin(0.5)
+          .setScrollFactor(0)
+          .setDepth(301);
+        this.endScreen.push(line);
+      })
+      .catch(() => undefined);
   }
 
   private endRun(extracted: boolean, reason = '') {

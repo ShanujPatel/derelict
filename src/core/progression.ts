@@ -55,6 +55,10 @@ export interface SaveData {
   daily: { day: string; best: number };
   /** Best extracted score on this week's challenge. */
   weekly: { week: string; best: number };
+  /** Your clan's tag and name as last seen online (shown offline, and on the results screen). */
+  clan: { tag: string; name: string } | null;
+  /** The week whose clan-goal bonus you've already been paid. */
+  clanGoalWeek: string;
   /** Consecutive days with a Daily Derelict extraction. */
   streak: { lastDay: string; count: number; best: number };
   settings: Settings;
@@ -167,6 +171,8 @@ export function defaultSave(): SaveData {
     callsignClaimed: '',
     daily: { day: '', best: 0 },
     weekly: { week: '', best: 0 },
+    clan: null,
+    clanGoalWeek: '',
     streak: { lastDay: '', count: 0, best: 0 },
     settings: { ...DEFAULT_SETTINGS },
     cosmetics: [],
@@ -621,6 +627,11 @@ export function sanitizeSave(raw: unknown): SaveData {
       isObj(raw.weekly) && typeof raw.weekly.week === 'string' && /^\d{4}-W\d{2}$/.test(raw.weekly.week)
         ? { week: raw.weekly.week, best: num(raw.weekly.best) }
         : { week: '', best: 0 },
+    clan:
+      isObj(raw.clan) && typeof raw.clan.tag === 'string' && /^[A-Z0-9]{2,4}$/.test(raw.clan.tag) && typeof raw.clan.name === 'string'
+        ? { tag: raw.clan.tag, name: raw.clan.name.slice(0, 20) }
+        : null,
+    clanGoalWeek: typeof raw.clanGoalWeek === 'string' && /^\d{4}-W\d{2}$/.test(raw.clanGoalWeek) ? raw.clanGoalWeek : '',
     settings: sanitizeSettings(raw.settings),
     credits: num(raw.credits),
     characters,
@@ -706,4 +717,19 @@ export function importSave(code: string): SaveData | null {
   } catch {
     return null;
   }
+}
+
+/** Remembers your clan (or that you have none) as the server last reported it. */
+export function setClanCache(save: SaveData, clan: { tag: string; name: string } | null): SaveData {
+  const same = (save.clan?.tag ?? null) === (clan?.tag ?? null) && (save.clan?.name ?? null) === (clan?.name ?? null);
+  return same ? save : { ...clone(save), clan: clan ? { tag: clan.tag, name: clan.name } : null };
+}
+
+/** Pays the weekly clan-goal bonus once per week. */
+export function claimClanGoal(save: SaveData, week: string, bonus: number): { save: SaveData; paid: boolean } {
+  if (!week || save.clanGoalWeek === week) return { save, paid: false };
+  const next = clone(save);
+  next.clanGoalWeek = week;
+  next.credits += bonus;
+  return { save: next, paid: true };
 }

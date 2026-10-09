@@ -16,6 +16,8 @@ import { CHAPTERS, CODEX, MINING_UNLOCK_EXTRACTIONS, chapterProgress } from '../
 import { dailySeed, dailyShip } from '../core/seed';
 import { dayFromDailySeed, formatDuration, type BoardEntry } from '../core/leaderboard';
 import { leaderboard } from '../net/leaderboard';
+import { CLAN, checkClanName, checkClanTag, clanGoal, type ClanBoardRow, type MyClan, type OpenClan } from '../core/clans';
+import { ACHIEVEMENTS as ALL_ACHIEVEMENTS } from '../core/achievements';
 import { BOARDS, boardDef, fastestFirst, formatCell, type BoardGroup, type BoardId, type HallRow } from '../core/hallOfFame';
 import { vesselName } from '../core/names';
 import { ACHIEVEMENTS } from '../core/achievements';
@@ -27,7 +29,10 @@ import { baseSeed } from '../core/depth';
 import { chooseName, ensureName, rollName, type NameResult } from '../net/names';
 import type { ShipType } from '../core/types';
 import {
+  awardAchievements,
   canBoard,
+  claimClanGoal,
+  setClanCache,
   computeRunStats,
   defaultSave,
   exportSave,
@@ -112,6 +117,31 @@ export class HubView {
     loading: null,
   };
   private hallScroll = 0;
+  /** Your clan as the server last reported it (undefined: not loaded yet). */
+  private clan: { at: number; loading: boolean; data: MyClan | null | undefined; error: string | null; busy: boolean } = {
+    at: 0,
+    loading: false,
+    data: undefined,
+    error: null,
+    busy: false,
+  };
+  /** What's typed in the clan forms, kept across re-renders. */
+  private clanForm: { name: string; tag: string; open: boolean | null; code: string; query: string } = {
+    name: '',
+    tag: '',
+    open: null,
+    code: '',
+    query: '',
+  };
+  private openClans: { at: number; query: string; list: OpenClan[] | null; error: string | null } = { at: 0, query: '', list: null, error: null };
+  /** Second tap confirms leaving or kicking. */
+  private clanConfirm = '';
+  private rankView: 'players' | 'clans' = 'players';
+  private clanScope: 'week' | 'all' = 'week';
+  private clanBoards: Partial<Record<'week' | 'all', { at: number; rows: ClanBoardRow[] | null; error: string | null }>> = {};
+  /** Clan tags for names on the boards ('' = looked up, no clan). */
+  private tags: Record<string, string> = {};
+  private tagsPending = false;
   private weeklyBoard: { week: string; at: number; loading: boolean; entries: BoardEntry[] | null; error: string | null } = {
     week: '',
     at: 0,
@@ -175,6 +205,13 @@ export class HubView {
   // ---------------------------------------------------------------- events
 
   private onKey = (e: KeyboardEvent) => {
+    if (e.key === 'Enter' && e.target instanceof HTMLInputElement && e.target.dataset.clanField) {
+      e.preventDefault();
+      const f = e.target.dataset.clanField;
+      if (f === 'code') return this.clanJoin({ code: this.clanForm.code });
+      if (f === 'query') return this.loadOpenClans(true);
+      return this.clanCreate();
+    }
     if (e.key === 'Enter' && e.target instanceof HTMLInputElement && 'callsign' in e.target.dataset) {
       e.preventDefault();
       return this.rename(chooseName(this.save, e.target.value, leaderboard));
@@ -194,6 +231,7 @@ export class HubView {
       this.sound('ui');
       this.tab = d.tab as Tab;
       this.confirmReset = false;
+      this.clanConfirm = '';
       this.render();
       this.body.scrollTop = 0;
       return;
@@ -266,6 +304,59 @@ export class HubView {
       case 'refresh-board':
         this.board.at = 0;
         return this.render();
+      case 'clan-open-choice':
+        this.clanForm.open = d.open === 'true';
+        return this.render();
+      case 'clan-create':
+        return this.clanCreate();
+      case 'clan-join-code':
+        return this.clanJoin({ code: this.clanForm.code });
+      case 'clan-join':
+        return this.clanJoin({ id: Number(d.id) });
+      case 'clan-search':
+        return this.loadOpenClans(true);
+      case 'clan-refresh':
+        this.clan.at = 0;
+        return this.render();
+      case 'clan-copy': {
+        const code = this.clan.data?.inviteCode ?? '';
+        navigator.clipboard?.writeText(code).then(
+          () => this.toast(`Invite code ${code} copied`),
+          () => this.toast(`Invite code: ${code}`),
+        );
+        return;
+      }
+      case 'clan-leave':
+        if (this.clanConfirm !== 'leave') {
+          this.clanConfirm = 'leave';
+          return this.render();
+        }
+        return this.clanLeave();
+      case 'clan-kick':
+        if (this.clanConfirm !== `kick:${d.name}`) {
+          this.clanConfirm = `kick:${d.name}`;
+          return this.render();
+        }
+        return this.clanManage({ kind: 'kick', callsign: d.name! }, `${d.name} removed`);
+      case 'clan-leader':
+        if (this.clanConfirm !== `leader:${d.name}`) {
+          this.clanConfirm = `leader:${d.name}`;
+          return this.render();
+        }
+        return this.clanManage({ kind: 'leader', callsign: d.name! }, `${d.name} now leads the clan`);
+      case 'clan-set-open':
+        return this.clanManage({ kind: 'open', open: d.open === 'true' }, d.open === 'true' ? 'Clan is open to anyone' : 'Clan is invite only');
+      case 'clan-new-code':
+        return this.clanManage({ kind: 'code' }, 'New invite code made. The old one no longer works');
+      case 'rank-view':
+        this.rankView = d.view === 'clans' ? 'clans' : 'players';
+        return this.render();
+      case 'clan-scope':
+        this.clanScope = d.scope === 'all' ? 'all' : 'week';
+        return this.render();
+      case 'refresh-clans':
+        delete this.clanBoards[this.clanScope];
+        return this.render();
       case 'hall-sort':
         this.hall.board = d.board as BoardId;
         return this.render();
@@ -329,6 +420,11 @@ export class HubView {
   /** Volume sliders and toggles in the Log tab apply live. */
   private onInput = (e: Event) => {
     const el = e.target as HTMLInputElement;
+    const field = el.dataset.clanField as 'name' | 'tag' | 'code' | 'query' | undefined;
+    if (field) {
+      this.clanForm[field] = el.value;
+      return;
+    }
     const key = el.dataset.setting as keyof Settings | undefined;
     if (!key) return;
     const value = el.type === 'checkbox' ? el.checked : Number(el.value) / 100;
@@ -485,6 +581,7 @@ export class HubView {
 
     return `
       ${this.nameSection()}
+      ${this.clanSection()}
       <section class="card preview">
         <canvas data-preview width="16" height="16" aria-label="${c.name} preview"></canvas>
         <div>
@@ -512,6 +609,311 @@ export class HubView {
         <button class="btn ghost dice" data-action="reroll" title="Random name" aria-label="Random name" ${busy}>⚄</button>
       </div>
       <p class="hub-note" style="margin-top:6px">Shown on the daily leaderboard. Every name is unique. Tap ⚄ for a random one.</p>
+    </section>`;
+  }
+
+  // ---------------------------------------------------------------- clans (v1.1)
+
+  /** Fetches your clan at most every 30 s. */
+  private loadClan() {
+    if (!leaderboard.enabled || this.clan.loading || !this.save.playerId) return;
+    if (this.clan.data !== undefined && Date.now() - this.clan.at < 30_000) return;
+    this.clan.loading = true;
+    leaderboard
+      .myClan(this.save.playerId)
+      .then((data) => this.applyClan(data))
+      .catch((e: Error) => (this.clan = { ...this.clan, at: Date.now(), error: e.message }))
+      .finally(() => {
+        this.clan.loading = false;
+        if (this.tab === 'crew' || this.tab === 'ranks') this.render();
+      });
+  }
+
+  /** Takes a fresh copy of your clan: remembers it, and pays the weekly goal bonus or podium trophy if due. */
+  private applyClan(data: MyClan | null) {
+    this.clan = { ...this.clan, at: Date.now(), data, error: null };
+    let save = setClanCache(this.save, data ? { tag: data.tag, name: data.name } : null);
+    if (data && data.weekSalvage >= clanGoal(data.members.length)) {
+      const goal = claimClanGoal(save, data.week, CLAN.goalBonus);
+      if (goal.paid) {
+        save = goal.save;
+        this.toast(`Clan goal reached! +${CLAN.goalBonus} salvage`);
+      }
+    }
+    if (data?.lastWeekRank && data.lastWeekRank <= 3 && !save.achievements.includes('clan-podium')) {
+      const podium = ALL_ACHIEVEMENTS.find((a) => a.id === 'clan-podium')!;
+      save = awardAchievements(save, [podium]);
+      this.toast(`★ PODIUM CREW: your clan finished #${data.lastWeekRank} last week (+${podium.reward})`);
+    }
+    if (save !== this.save) {
+      this.save = save;
+      this.callbacks.onSave(save);
+    }
+    if (data) this.tags[this.save.callsign] = data.tag;
+    else if (this.save.callsign in this.tags) this.tags[this.save.callsign] = '';
+  }
+
+  /** Runs a clan request with the buttons disabled, then shows the result. */
+  private clanRequest(work: Promise<MyClan | null>, done: string) {
+    if (this.clan.busy) return;
+    this.clan.busy = true;
+    this.clanConfirm = '';
+    this.render();
+    work
+      .then((data) => {
+        this.applyClan(data);
+        delete this.clanBoards.week;
+        delete this.clanBoards.all;
+        this.openClans.at = 0;
+        this.sound('buy');
+        this.toast(done);
+      })
+      .catch((e: Error) => {
+        this.sound('denied');
+        this.toast(e.message.charAt(0).toUpperCase() + e.message.slice(1), true);
+      })
+      .finally(() => {
+        this.clan.busy = false;
+        if (this.root.isConnected) this.render();
+      });
+  }
+
+  private clanCreate() {
+    const name = checkClanName(this.clanForm.name);
+    if (!name.ok) return this.toast(name.reason, true);
+    const tag = checkClanTag(this.clanForm.tag);
+    if (!tag.ok) return this.toast(tag.reason, true);
+    if (this.clanForm.open === null) return this.toast('Choose open or invite only', true);
+    const open = this.clanForm.open;
+    this.clanRequest(
+      leaderboard.createClan(this.save.playerId, name.value, tag.value, open).then((c) => {
+        this.clanForm = { name: '', tag: '', open: null, code: '', query: '' };
+        return c;
+      }),
+      `[${tag.value}] ${name.value} founded`,
+    );
+  }
+
+  private clanJoin(by: { code: string } | { id: number }) {
+    if ('code' in by && !by.code.trim()) return this.toast('Enter an invite code', true);
+    this.clanRequest(leaderboard.joinClan(this.save.playerId, by), 'Welcome aboard');
+  }
+
+  private clanLeave() {
+    const tag = this.clan.data?.tag ?? '';
+    this.clanRequest(
+      leaderboard.leaveClan(this.save.playerId).then(() => null),
+      `You left [${tag}]. You can join another clan in ${CLAN.rejoinHours} hours`,
+    );
+  }
+
+  private clanManage(action: Parameters<typeof leaderboard.manageClan>[1], done: string) {
+    this.clanRequest(leaderboard.manageClan(this.save.playerId, action), done);
+  }
+
+  private loadOpenClans(force = false) {
+    const query = this.clanForm.query.trim();
+    if (!leaderboard.enabled || (!force && this.openClans.at && Date.now() - this.openClans.at < 60_000)) return;
+    this.openClans = { ...this.openClans, at: Date.now(), query };
+    leaderboard
+      .browseClans(query)
+      .then((list) => (this.openClans = { at: Date.now(), query, list, error: null }))
+      .catch((e: Error) => (this.openClans = { at: Date.now(), query, list: null, error: e.message }))
+      .finally(() => this.tab === 'crew' && this.render());
+  }
+
+  /** The clan card in CREW: create or join one, or see and run yours. */
+  private clanSection(): string {
+    if (!leaderboard.enabled) {
+      return `<section class="hub-section"><h3>Clan</h3><p class="hub-note">Clans need the online leaderboard, which isn't switched on for this build.</p></section>`;
+    }
+    this.loadClan();
+    const c = this.clan.data;
+    if (c === undefined) {
+      return `<section class="hub-section"><h3>Clan</h3><p class="hub-note">${this.clan.error ? `Couldn't reach the clan list: ${esc(this.clan.error)}` : 'Checking your clan…'}</p></section>`;
+    }
+    return c ? this.myClanCard(c) : this.noClanCard();
+  }
+
+  private noClanCard(): string {
+    this.loadOpenClans();
+    const busy = this.clan.busy ? 'disabled' : '';
+    const f = this.clanForm;
+    const claimed = this.save.callsign === this.save.callsignClaimed;
+    const open = this.openClans.list;
+    const list = this.openClans.error
+      ? `<p class="hub-note">Couldn't load open clans: ${esc(this.openClans.error)}</p>`
+      : !open
+        ? '<p class="hub-note">Loading open clans…</p>'
+        : !open.length
+          ? `<p class="hub-note">${this.openClans.query ? 'No open clans match.' : 'No open clans with room yet. Found one!'}</p>`
+          : `<ul class="clan-list">${open
+              .map(
+                (o) => `<li>
+                  <span class="ctag">[${esc(o.tag)}]</span>
+                  <span class="cl-name">${esc(o.name)}</span>
+                  <span class="cl-meta">${o.members}/${CLAN.maxMembers} · ${o.weekSalvage.toLocaleString('en-GB')} this week</span>
+                  <button class="btn ghost small" data-action="clan-join" data-id="${o.id}" ${busy}>JOIN</button>
+                </li>`,
+              )
+              .join('')}</ul>`;
+    return `<section class="hub-section clan-section"><h3>Clan</h3>
+      <div class="card clan-card">
+        <p class="hub-note">Team up: every member's banked salvage counts towards the clan, each week and all time. Up to ${CLAN.maxMembers} salvagers per clan.</p>
+        ${claimed ? '' : '<p class="hub-note warn">Your name is still being reserved. Save it above first.</p>'}
+        <h4>Join with an invite code</h4>
+        <div class="clan-row">
+          <input data-clan-field="code" placeholder="RUST-7KQ2" maxlength="10" value="${esc(f.code)}" autocomplete="off" spellcheck="false" aria-label="Invite code" ${busy} />
+          <button class="btn ghost" data-action="clan-join-code" ${busy}>JOIN</button>
+        </div>
+        <h4>Open clans</h4>
+        <div class="clan-row">
+          <input data-clan-field="query" placeholder="Search by name or tag" maxlength="20" value="${esc(f.query)}" autocomplete="off" spellcheck="false" aria-label="Search clans" ${busy} />
+          <button class="btn ghost" data-action="clan-search" ${busy}>SEARCH</button>
+        </div>
+        ${list}
+        <h4>Found a clan</h4>
+        <div class="clan-row">
+          <input data-clan-field="name" placeholder="Clan name" maxlength="20" value="${esc(f.name)}" autocomplete="off" spellcheck="false" aria-label="Clan name" ${busy} />
+          <input class="tag-input" data-clan-field="tag" placeholder="TAG" maxlength="4" value="${esc(f.tag)}" autocomplete="off" spellcheck="false" aria-label="Clan tag" ${busy} />
+        </div>
+        <div class="clan-choice" role="radiogroup" aria-label="Who can join">
+          <button class="choice" role="radio" data-action="clan-open-choice" data-open="true" aria-checked="${f.open === true}" ${busy}><span>Open</span><small>Anyone can join from the list</small></button>
+          <button class="choice" role="radio" data-action="clan-open-choice" data-open="false" aria-checked="${f.open === false}" ${busy}><span>Invite only</span><small>Members share the invite code</small></button>
+        </div>
+        <div class="btn-row"><button class="btn" data-action="clan-create" ${busy}>FOUND CLAN</button></div>
+      </div>
+    </section>`;
+  }
+
+  private myClanCard(c: MyClan): string {
+    const busy = this.clan.busy ? 'disabled' : '';
+    const goal = clanGoal(c.members.length);
+    const pct = Math.min(100, Math.round((c.weekSalvage / goal) * 100));
+    const n = (v: number) => v.toLocaleString('en-GB');
+    const members = c.members
+      .map((m) => {
+        const tools =
+          c.isLeader && !m.you
+            ? `<span class="cm-tools">
+                <button class="btn ghost small" data-action="clan-leader" data-name="${esc(m.callsign)}" ${busy}>${this.clanConfirm === `leader:${m.callsign}` ? 'CONFIRM' : 'MAKE LEADER'}</button>
+                <button class="btn ghost small danger" data-action="clan-kick" data-name="${esc(m.callsign)}" ${busy}>${this.clanConfirm === `kick:${m.callsign}` ? 'CONFIRM' : 'KICK'}</button>
+              </span>`
+            : '';
+        return `<li class="${m.you ? 'you' : ''}">
+          <span class="cm-name">${m.leader ? '★ ' : ''}${esc(m.callsign)}${m.you ? ' <small>YOU</small>' : ''}</span>
+          <span class="cm-week">${n(m.weekSalvage)}</span>
+          <span class="cm-all">${n(m.allSalvage)}</span>
+          ${tools}
+        </li>`;
+      })
+      .join('');
+    const leader = c.isLeader
+      ? `<h4>Leader tools</h4>
+        <div class="clan-choice" role="radiogroup" aria-label="Who can join">
+          <button class="choice" role="radio" data-action="clan-set-open" data-open="true" aria-checked="${c.open}" ${busy}><span>Open</span><small>Listed for anyone to join</small></button>
+          <button class="choice" role="radio" data-action="clan-set-open" data-open="false" aria-checked="${!c.open}" ${busy}><span>Invite only</span><small>Code needed</small></button>
+        </div>
+        <div class="btn-row"><button class="btn ghost" data-action="clan-new-code" ${busy}>NEW INVITE CODE</button></div>`
+      : '';
+    return `<section class="hub-section clan-section"><h3>Clan</h3>
+      <div class="card clan-card mine">
+        <div class="clan-head">
+          <span class="ctag big">[${esc(c.tag)}]</span>
+          <span class="clan-name">${esc(c.name)}</span>
+          <span class="clan-badge">${c.open ? 'OPEN' : 'INVITE ONLY'} · ${c.members.length}/${CLAN.maxMembers}</span>
+        </div>
+        <div class="clan-stats">
+          <div><b>${n(c.weekSalvage)}</b><span>THIS WEEK${c.weekRank ? ` · #${c.weekRank}` : ''}</span></div>
+          <div><b>${n(c.allSalvage)}</b><span>ALL TIME</span></div>
+          <div><b>${c.lastWeekRank ? `#${c.lastWeekRank}` : '—'}</b><span>LAST WEEK</span></div>
+        </div>
+        <div class="clan-goal" title="Weekly goal: ${n(goal)} salvage">
+          <div class="goal-bar"><i style="width:${pct}%"></i></div>
+          <span>Weekly goal ${n(c.weekSalvage)} / ${n(goal)}${pct >= 100 ? ' · REACHED' : ''} · +${CLAN.goalBonus} salvage each when reached</span>
+        </div>
+        <div class="clan-invite">
+          <span>Invite code</span><b>${esc(c.inviteCode)}</b>
+          <button class="btn ghost small" data-action="clan-copy">COPY</button>
+        </div>
+        <h4>Members <small>this week · all time</small></h4>
+        <ol class="clan-members">${members}</ol>
+        ${leader}
+        <div class="btn-row">
+          <button class="btn ghost small" data-action="clan-refresh" ${busy}>REFRESH</button>
+          <button class="btn ghost small danger" data-action="clan-leave" ${busy}>${this.clanConfirm === 'leave' ? `CONFIRM: LEAVE [${esc(c.tag)}]` : 'LEAVE CLAN'}</button>
+        </div>
+        <p class="hub-note">Only salvage you bank while you're a member counts, and it stays with the clan if you leave. After leaving you wait ${CLAN.rejoinHours} hours before joining another. Top-3 clans each week earn their members a banner trophy colour.</p>
+      </div>
+    </section>`;
+  }
+
+  // ---------------------------------------------------------------- clan tags on the boards
+
+  /** Looks up clan tags for names on screen (once each), then re-renders if any turned up. */
+  private ensureTags(names: string[]) {
+    if (!leaderboard.enabled || this.tagsPending) return;
+    const missing = [...new Set(names)].filter((n) => !(n in this.tags));
+    if (!missing.length) return;
+    this.tagsPending = true;
+    for (const n of missing) this.tags[n] = '';
+    leaderboard
+      .clanTags(missing)
+      .then((found) => {
+        Object.assign(this.tags, found);
+        if (Object.keys(found).length && this.root.isConnected) this.render();
+      })
+      .catch(() => undefined)
+      .finally(() => (this.tagsPending = false));
+  }
+
+  /** A name with its clan tag in front, as HTML. */
+  private tagged(callsign: string): string {
+    const tag = this.tags[callsign];
+    return `${tag ? `<em class="ctag">[${esc(tag)}]</em> ` : ''}${esc(callsign)}`;
+  }
+
+  /** The clan board in RANKS: clans by salvage this week or all time. */
+  private clanBoardSection(): string {
+    const scope = this.clanScope;
+    const cached = this.clanBoards[scope];
+    if (!cached || (cached.rows && Date.now() - cached.at > 60_000)) {
+      this.clanBoards[scope] = { at: Date.now(), rows: cached?.rows ?? null, error: null };
+      leaderboard
+        .clanBoard(scope, this.save.playerId)
+        .then((rows) => (this.clanBoards[scope] = { at: Date.now(), rows, error: null }))
+        .catch((e: Error) => (this.clanBoards[scope] = { at: Date.now(), rows: null, error: e.message }))
+        .finally(() => this.tab === 'ranks' && this.render());
+    }
+    const n = (v: number) => v.toLocaleString('en-GB');
+    const now = this.clanBoards[scope];
+    let body: string;
+    if (now?.error) body = `<p class="hub-note">Couldn't load the clan board: ${esc(now.error)}</p>`;
+    else if (!now?.rows) body = '<p class="hub-note">Loading…</p>';
+    else if (!now.rows.length) body = '<p class="hub-note">No clans yet. Found the first one in CREW.</p>';
+    else
+      body = `<div class="hall-scroll"><table class="hall-table clan-table">
+        <thead><tr><th class="h-rank">#</th><th class="h-name">Clan</th><th class="num sorted">Salvage ▼</th><th class="num">Crew</th><th class="num">Runs</th><th class="num">Bosses</th></tr></thead>
+        <tbody>${now.rows
+          .map(
+            (r) => `<tr class="${r.isYours ? 'you' : ''} ${r.rank <= 3 ? 'top' : ''}">
+              <td class="h-rank">${r.rank}</td>
+              <td class="h-name"><em class="ctag">[${esc(r.tag)}]</em> ${esc(r.name)}${r.isYours ? ' <small>YOURS</small>' : ''}</td>
+              <td class="num sorted">${n(r.salvage)}</td>
+              <td class="num">${r.members}/${CLAN.maxMembers}${r.open ? '' : ' 🔒'}</td>
+              <td class="num">${n(r.runs)}</td>
+              <td class="num">${n(r.bosses)}</td>
+            </tr>`,
+          )
+          .join('')}</tbody></table></div>`;
+    return `<section class="hub-section"><h3>Top clans · ${scope === 'week' ? 'this week' : 'all time'}</h3>
+      <div class="seg" role="tablist">
+        <button class="seg-btn" role="tab" data-action="clan-scope" data-scope="week" aria-selected="${scope === 'week'}">THIS WEEK</button>
+        <button class="seg-btn" role="tab" data-action="clan-scope" data-scope="all" aria-selected="${scope === 'all'}">ALL TIME</button>
+      </div>
+      ${body}
+      <div class="btn-row"><button class="btn ghost" data-action="refresh-clans">REFRESH</button></div>
+      <p class="hub-note">A clan's score is every member's banked salvage while they're in it. The weekly season resets with the Weekly Challenge; the top three clans earn their members a banner trophy colour. Make or join a clan in <button class="text-link" data-tab="crew">CREW</button>.</p>
     </section>`;
   }
 
@@ -650,11 +1052,12 @@ export class HubView {
     } else if (this.board.entries.length === 0) {
       board = '<p class="hub-note">No scores yet today. Extract and you\'re top of the board.</p>';
     } else {
+      this.ensureTags(this.board.entries.map((r) => r.callsign));
       board = `<ol class="board">${this.board.entries
         .map(
           (r) => `<li class="${r.isYou ? 'you' : ''}">
             <span class="b-rank">${r.rank}</span>
-            <span class="b-name">${esc(r.callsign)}${r.isYou ? ' <small>YOU</small>' : ''}</span>
+            <span class="b-name">${this.tagged(r.callsign)}${r.isYou ? ' <small>YOU</small>' : ''}</span>
             <span class="b-score">${r.score}</span>
             <span class="b-time">${formatDuration(r.durationMs)}</span>
             <span class="b-crew" title="${esc(r.character)}">${r.character === 'robot' ? '⚙' : '◉'}</span>
@@ -710,6 +1113,16 @@ export class HubView {
       return `<section class="hub-section"><h3>Hall of fame · all time</h3>
         <p class="hub-note">The online leaderboard isn't switched on for this build, so there are no all-time rankings. Your own records are under <button class="text-link" data-tab="log">LOG</button>.</p></section>`;
     }
+    const view = this.rankView;
+    const switcher = `<div class="seg rank-switch" role="tablist">
+        <button class="seg-btn" role="tab" data-action="rank-view" data-view="players" aria-selected="${view === 'players'}">SALVAGERS</button>
+        <button class="seg-btn" role="tab" data-action="rank-view" data-view="clans" aria-selected="${view === 'clans'}">CLANS</button>
+      </div>`;
+    if (view === 'clans') return switcher + this.clanBoardSection();
+    return switcher + this.playerRanks();
+  }
+
+  private playerRanks(): string {
     this.loadHall();
     const sort = boardDef(this.hall.board);
     const cached = this.hall.cache[sort.id];
@@ -730,11 +1143,12 @@ export class HubView {
     } else if (!cached?.rows) {
       body = '<p class="hub-note">Loading…</p>';
     } else {
+      this.ensureTags(cached.rows.map((r) => r.callsign));
       const rows = cached.rows
         .map(
           (r) => `<tr class="${r.isYou ? 'you' : ''} ${r.rank <= 3 ? 'top' : ''}">
             <td class="h-rank">${r.rank}</td>
-            <td class="h-name">${esc(r.callsign)}${r.isYou ? ' <small>YOU</small>' : ''}</td>
+            <td class="h-name">${this.tagged(r.callsign)}${r.isYou ? ' <small>YOU</small>' : ''}</td>
             ${BOARDS.map((b) => `<td class="num ${b.id === sort.id ? 'sorted' : ''}">${formatCell(b.id, r.values[b.id])}</td>`).join('')}
           </tr>`,
         )
@@ -775,11 +1189,12 @@ export class HubView {
     if (b.error) return `<p class="hub-note">Couldn't load the weekly board: ${esc(b.error)}</p>`;
     if (!b.entries) return '<p class="hub-note">Loading the weekly board…</p>';
     if (!b.entries.length) return '<p class="hub-note">Nobody has extracted this week yet. Top spot is open.</p>';
+    this.ensureTags(b.entries.map((r) => r.callsign));
     return `<ol class="board weekly-board">${b.entries
       .map(
         (r) => `<li class="${r.isYou ? 'you' : ''}">
           <span class="b-rank">${r.rank}</span>
-          <span class="b-name">${esc(r.callsign)}${r.isYou ? ' <small>YOU</small>' : ''}</span>
+          <span class="b-name">${this.tagged(r.callsign)}${r.isYou ? ' <small>YOU</small>' : ''}</span>
           <span class="b-score">${r.score}</span>
           <span class="b-time">${formatDuration(r.durationMs)}</span>
           <span class="b-crew">${r.character === 'robot' ? '⚙' : '◉'}</span>

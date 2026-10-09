@@ -179,6 +179,14 @@ Opt-in runs from the DAILY tab (unlocked after 3 extractions; the Bloom Mother a
 - **Seed explorer**: `map.html`, core modules only (no Phaser).
 - **App**: manifest, icons, service worker (network-first pages, cache-first hashed assets, `ignoreVary`).
 
+## 9g. Clans (v1.1)
+
+- Tables `clans` (name, tag, leader, open, invite code), `clan_members` (one row per player), `clan_scores` (clan × player × period, where period is an ISO week or `all`; rows outlive membership).
+- `submit_run` credits the player's clan (salvage only if extracted; runs, kills and boss kills always) and returns `{tag, name, added, weekSalvage, weekRank}` for the results screen.
+- Clan score = sum of `clan_scores.salvage` for the period. Weekly goal `max(5000, 2500 × members)`, +100 each, paid client-side once per week. Podium (top 3 last week) awards the *Podium crew* achievement.
+- Limits: 15 members, 24 h rejoin wait after leaving (not after a kick), leader hand-over on leave, empty clans deleted.
+- UI: CREW clan card (join by code, browse open clans, found one with a required open/invite-only choice; or your clan with leader tools); RANKS Salvagers/Clans switch; tags on boards via `get_clan_tags`.
+
 ## 10. Art and audio
 
 - **Pixel art**, 16×16 tiles, limited palette per ship type (cold blues for freighters, sickly greens for research vessels).
@@ -231,6 +239,7 @@ Each version is a tagged GitHub release with notes.
 | **v0.8** ✅ | Deep salvage: gamepad, deep dive, weekly challenge, streaks, arc caster, sentry, 3 perks, mimics, stalkers, shock floors, bounties, combos, codex chapter 2, run history, tips, field manual, assist mode, trophy cosmetics, share card |
 | **v0.9** ✅ | All-time hall of fame: salvage, records, boss times, kills by hostile type |
 | **v1.0** ✅ | The Saw-Tooth: mining haulers, the Hollow Captain, codex chapter 3, weekly board, ghosts, seed explorer, installable offline app, faster loading |
+| **v1.1** ✅ | Clans: open or invite-only, 15 members, weekly and all-time clan boards, goals, tags |
 | **Later** | Codex chapter 4 (the survey ship Caldera); ghost races against friends; more bosses |
 
 ## 13. Open questions
