@@ -185,6 +185,18 @@ export const OXYGEN: PixelSprite = {
   ],
 };
 
+/** Overdrive chip: a lightning bolt on a red card. */
+export const OVERDRIVE: PixelSprite = {
+  palette: { k: '#2a0a08', r: '#c8331f', y: '#ffd166', w: '#fff6d6' },
+  rows: ['kkkkkkkk', 'krrryyrk', 'krryyrrk', 'kryywyrk', 'krrwyyrk', 'krryyrrk', 'kryrrrrk', 'kkkkkkkk'],
+};
+
+/** Aegis cell: a little hex shield. */
+export const AEGIS: PixelSprite = {
+  palette: { k: '#06141a', c: '#5ef2ff', C: '#c8fbff', d: '#2a8fa0' },
+  rows: ['..kkkk..', '.kcCCck.', 'kcCccdck', 'kcCcccdk', 'kccccddk', 'kdccdddk', '.kddddk.', '..kkkk..'],
+};
+
 /** Explosive fuel drum: red with a hazard band. Shoot it. */
 export const FUEL_DRUM: PixelSprite = {
   palette: { k: '#1a0a08', r: '#c8331f', d: '#8e2214', h: '#ff6a4a', y: '#ffd166', b: '#222' },
@@ -241,6 +253,41 @@ export const SALVAGE: PixelSprite = {
   ],
 };
 
+/** Mimic frames: 0 looks exactly like salvage; 1–2 open-mouthed, chomping. */
+export const MIMIC_FRAMES: PixelSprite[] = [
+  SALVAGE,
+  {
+    palette: { k: '#2a1a08', y: '#e8b04a', Y: '#ffd98a', d: '#8a5a1c', m: '#3a0a10', w: '#f2efe6', r: '#ff3b4e' },
+    rows: [
+      'kkkkkkkkkk',
+      'kYYYYYYYyk',
+      'kwkwkwkwyk',
+      'kmmmmmmmmk',
+      'kmmrmmrmmk',
+      'kmmmmmmmmk',
+      'kwkwkwkwyk',
+      'kydyyyydyk',
+      'kyyyyyyyyk',
+      'kkkkkkkkkk',
+    ],
+  },
+  {
+    palette: { k: '#2a1a08', y: '#e8b04a', Y: '#ffd98a', d: '#8a5a1c', m: '#3a0a10', w: '#f2efe6', r: '#ff3b4e' },
+    rows: [
+      'kkkkkkkkkk',
+      'kYYYYYYYyk',
+      'kYdyyyydyk',
+      'kwkwkwkwyk',
+      'kmmrmmrmmk',
+      'kwkwkwkwyk',
+      'kyydyydyyk',
+      'kydyyyydyk',
+      'kyyyyyyyyk',
+      'kkkkkkkkkk',
+    ],
+  },
+];
+
 export const LAMP: PixelSprite = {
   palette: { k: '#1a1208', r: '#ff9a3c', w: '#ffe2b8' },
   rows: ['.kk.', 'krrk', 'krwk', '.kk.'],
@@ -289,6 +336,10 @@ export const CRAWLER_FRAMES: PixelSprite[] = [
   ['..l...l...', '...l.l.l..', '...l.l.l..', '..l...l...'],
   ['...l...l..', '..l.l.l...', '..l.l.l...', '...l...l..'],
 ].map(([a, b, c, d]) => ({ palette: CRAWLER_PALETTE, rows: [a, b, ...CRAWLER_BODY, c, d] }));
+
+const STALKER_PALETTE = { k: '#120a1c', g: '#8a7fb0', G: '#d8d0ff', e: '#ff3b8e', l: '#5a4f80' };
+/** Stalker: a crawler cousin that bends light round itself until it's close. */
+export const STALKER_FRAMES: PixelSprite[] = CRAWLER_FRAMES.map((f) => ({ palette: STALKER_PALETTE, rows: f.rows }));
 
 const SPITTER_ROWS = (mouth: string[]) => [
   '..............',

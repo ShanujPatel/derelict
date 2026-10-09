@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { CHAPTERS, CODEX, RESEARCH_UNLOCK_LOG, chapterProgress, isResearchUnlocked, nextLogFor } from '../src/core/codex';
+import { CHAPTERS, CODEX, RESEARCH_UNLOCK_LOG, bossLog, chapterProgress, isResearchUnlocked, nextLogFor } from '../src/core/codex';
 import {
   applyRunResult,
   canBoard,
@@ -13,7 +13,8 @@ import {
 } from '../src/core/progression';
 import { TOOLS } from '../src/core/catalog';
 
-const ids = (ship: 'freighter' | 'research') => CODEX.filter((e) => e.ship === ship).map((e) => e.id);
+const ids = (ship: 'freighter' | 'research') =>
+  CODEX.filter((e) => e.ship === ship && (e.source ?? 'ship') === 'ship').map((e) => e.id);
 
 describe('codex data', () => {
   it('has unique ids and a log for every chapter', () => {
@@ -35,6 +36,29 @@ describe('nextLogFor', () => {
     }
     expect(nextLogFor(found, 'freighter')).toBeNull();
     expect(nextLogFor(found, 'research')?.id).toBe(ids('research')[0]);
+  });
+});
+
+describe('chapter 2', () => {
+  it('follows chapter 1 on ships', () => {
+    const ch1 = CODEX.filter((e) => e.chapter === 1 && e.ship === 'freighter').map((e) => e.id);
+    expect(nextLogFor(ch1, 'freighter')?.chapter).toBe(2);
+    expect(nextLogFor([], 'freighter')?.chapter).toBe(1);
+  });
+
+  it('keeps one log for each boss, never on ships', () => {
+    expect(bossLog([], 'foreman')?.id).toBe('c2-05');
+    expect(bossLog([], 'mother')?.id).toBe('c2-06');
+    expect(bossLog(['c2-05'], 'foreman')).toBeNull();
+    const everyShipLog = CODEX.filter((e) => (e.source ?? 'ship') === 'ship').map((e) => e.id);
+    expect(nextLogFor(everyShipLog, 'freighter')).toBeNull();
+  });
+
+  it('pays its own reward', () => {
+    const all = CODEX.filter((e) => e.chapter === 2).map((e) => e.id);
+    const s = applyRunResult(defaultSave(), { extracted: false, salvage: 0, dronesDestroyed: 0, logsFound: all });
+    expect(chapterProgress(s.codex, 2).complete).toBe(true);
+    expect(s.credits).toBe(CHAPTERS[1].reward);
   });
 });
 

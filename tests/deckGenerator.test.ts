@@ -109,7 +109,7 @@ describe('generateDeck', () => {
   it('item values stay inside their configured ranges', () => {
     for (const ship of SHIP_TYPES) {
       const rules = new Map(DECK_OPTIONS[ship].spawns);
-      for (const s of generateDeck('loot', ship).spawns.filter((x) => x.kind !== 'medkit' && x.kind !== 'drum')) {
+      for (const s of generateDeck('loot', ship).spawns.filter((x) => !['medkit', 'drum', 'mimic', 'stalker'].includes(x.kind))) {
         const [lo, hi] = rules.get(s.kind)!.value;
         expect(s.value).toBeGreaterThanOrEqual(lo);
         expect(s.value).toBeLessThanOrEqual(hi);
@@ -162,12 +162,40 @@ describe('generateDeck', () => {
       }
     });
 
+    it('hide mimic crates on freighters only, away from the start', () => {
+      for (const [seed, ship] of CASES) {
+        const deck = generateDeck(seed, ship);
+        const mimics = deck.spawns.filter((s) => s.kind === 'mimic');
+        const stalkers = deck.spawns.filter((s) => s.kind === 'stalker');
+        expect(stalkers.length).toBe(ship === 'research' ? DECK_OPTIONS.research.stalkers : 0);
+        for (const m of stalkers) expect(bfsDistances(deck.tiles, deck.start)[m.y][m.x]).toBeGreaterThanOrEqual(MIN_ENEMY_DISTANCE);
+        if (ship === 'research') expect(mimics).toHaveLength(0);
+        else expect(mimics.length, seed).toBe(DECK_OPTIONS.freighter.mimics);
+        const dist = bfsDistances(deck.tiles, deck.start);
+        for (const m of mimics) expect(dist[m.y][m.x]).toBeGreaterThanOrEqual(MIN_ENEMY_DISTANCE);
+      }
+    });
+
+    it('put shock floors inside rooms, away from the start and exit rooms', () => {
+      for (const [seed, ship] of CASES) {
+        const deck = generateDeck(seed, ship);
+        expect(deck.hazards!.length).toBeLessThanOrEqual(DECK_OPTIONS[ship].hazards);
+        for (const h of deck.hazards!) {
+          for (let y = h.y; y < h.y + h.h; y++) for (let x = h.x; x < h.x + h.w; x++) expect(deck.tiles[y][x]).toBe(Tile.Floor);
+          const inside = (p: { x: number; y: number }) => p.x >= h.x - 1 && p.x <= h.x + h.w && p.y >= h.y - 1 && p.y <= h.y + h.h;
+          expect(inside(deck.start)).toBe(false);
+          expect(inside(deck.extraction)).toBe(false);
+        }
+      }
+    });
+
     it("don't change anything else about a seed's layout", () => {
       for (const ship of SHIP_TYPES) {
         for (const seed of SEEDS.slice(0, 20)) {
           const withKits = generateDeck(seed, ship);
-          const without = generateDeck(seed, ship, { medkits: { count: 0, heal: 0 }, drums: 0 });
-          expect({ ...withKits, spawns: withKits.spawns.filter((s) => s.kind !== 'medkit' && s.kind !== 'drum') }).toEqual(without);
+          const without = generateDeck(seed, ship, { medkits: { count: 0, heal: 0 }, drums: 0, mimics: 0, hazards: 0, stalkers: 0 });
+          const added = ['medkit', 'drum', 'mimic', 'stalker'];
+          expect({ ...withKits, hazards: [], spawns: withKits.spawns.filter((s) => !added.includes(s.kind)) }).toEqual(without);
         }
       }
     });

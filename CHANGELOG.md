@@ -1,6 +1,54 @@
 # Changelog
 
-## [0.6.0] — Unreleased: Field kit
+## [0.8.0] — Unreleased: Deep salvage
+
+### Added
+- **Gamepad support** through the browser Gamepad API: left stick move, right stick aim, RT (or a full right-stick push) fire, A/LB roll, X/RB tool, Y swap, Back/B scanner, Start pause. Works in the hub (Start launches, Y boards the daily), the pause menu and the results screen. Moving the mouse hands aim back to it. Radial deadzone maths in `src/core/gamepad.ts`.
+- **Deep dive**: ordinary runs have a purple lift pad. Descending carries health, oxygen, salvage, kills and logs to a deeper deck (`SEED-D2`, up to depth 5) with +7% elite chance, +25% salvage and +5% hostile speed per level. The run clock spans every deck; retry starts from the top. Achievement *Deep diver*.
+- **Weekly Challenge**: one ship per ISO week with two mutators out of six (Glass cannon, Thin air, Swarm, Bloodthirsty, Jackpot, Lights out). Card in the DAILY tab, local best per week, `?weekly` link, achievement *Mutant*.
+- **Daily streaks**: the first Daily extraction each day extends your streak and pays +10 salvage per day in a row (up to +70). Shown on the daily card.
+- **Arc caster** (220 salvage): instant chain lightning that jumps between up to 4 targets, ignores riot shields, and sets off drums.
+- **Sentry drone** tool (220 salvage): a friendly auto-turret for 12 seconds.
+- **Perks**: Adrenaline (roll recharges twice as fast), Demolitionist (bigger blasts that never hurt you), Field medic (+60% healing).
+- **Mimic crates** on freighters and cloaked **stalkers** on research vessels, each on their own random stream.
+- **Shock floors**: electrified patches that flicker, go live, then rest. They hurt you and walking hostiles (drones hover over them). Marked on the scanner.
+- **Bounties**: one named, tougher, tracked hostile per ordinary run, worth 40–70 salvage. Achievement *Bounty hunter*.
+- **Salvage combos**: pickups within 4 s of each other build a multiplier up to ×1.5. Achievement *Hoover*.
+- **Codex chapter 2**, *The Gravecutter Ledger*: four ship logs plus one carried by each boss (dropped on the kill). Pays 250 on completion.
+- **Run history** (last 10 runs) and a bigger lifetime service record in the Log tab.
+- **First-time tips** for ten situations, worded for keyboard, touch or gamepad; switch off or reset in settings.
+- **Field manual** in the Log tab: a controls table for all three input types and a guide to everything aboard.
+- **Assist mode** (+50% oxygen, half damage; daily runs not posted) and an always-on **corner minimap**, in settings; the minimap toggle is also in the pause menu.
+- **Trophy cosmetics**: five colour options that can't be bought, only earned through achievements and boss kills.
+- **Share card**: results screen SHARE (S / Y) copies a text card with a replay link, or opens the phone's share sheet.
+- **Pause summary**: vessel, time, salvage, condition or mutators, bounty and data log status.
+- **Power-ups**: Overdrive (double fire rate, 8 s) and Aegis (soaks the next 2 hits). Elites and bounties always drop one; other kills 4% of the time.
+- **Self-repair** perk (robot only): out of combat for 4 s, battery is turned into hull repairs.
+- **Turret laser sights**: hostile turrets lock on for 0.55 s, showing a red sight, before their first shot.
+- **Personal bests** panel in the Log tab: biggest haul, today's daily, this week's challenge, deepest dive, longest combo, streak, bounties and fastest boss kills.
+
+### Changed
+- Intro texts wrap on narrow screens, and the ship condition label moves below the weapon line in portrait.
+- Results buttons stay on screen on short landscape phones.
+
+### Notes
+- Every new spawn (mimics, stalkers, shock floors, lift) uses its own random stream, so existing seeds keep their layouts; tests check it.
+
+## [0.7.0] — 2026-10-09: Contracts
+
+### Added
+- **Boss contracts**, taken from a new section of the DAILY tab once you've extracted 3 times (the Bloom Mother also needs research vessels unlocked). Each card explains how to win and shows your record.
+- **Boss arenas** (`src/core/arena.ts`): handcrafted, mirrored three-part maps with seeded cover layouts: a staging bay (supplies and guards), the arena (pillars, weak points, drums) and a vault behind a sealed bulkhead that opens when the boss dies.
+- **The Foreman**, freighter cargo bay: armour blocks normal fire. Telegraphed charges (red warning line, aim locks late) stun it when it hits a wall or pillar; 4 power couplings each overload it, and destroying all of them strips its armour; drum blasts stun and damage it; the railgun does half damage through armour. Phase 2 at half health: faster, wider rivet sprays, drones through floor hatches.
+- **The Bloom Mother**, research hatchery: only takes damage while her mouth is open (after a visible wobble), when she also spits an acid fan. Three feeder roots (tethered to her) heal her, can be shot or burned with the torch, and regrow after 20 s. Drums beside her hit through the carapace. Births crawlers; phase 2 adds slow spore rings.
+- Boss health bar with the boss's current state (ARMOURED, STUNNED, CORE EXPOSED...), at the bottom on desktop and under the top buttons on touch.
+- First-kill bonuses (200 / 220 salvage), best times, two boss achievements (*Fired*, *Root and branch*), boss loot drops, new sounds (charge, slam, roar, armour ping, death, vault door) and pixel art for both bosses, couplings, roots and the bulkhead.
+- Shareable fights: `?boss=foreman&seed=ABC123`.
+
+### Changed
+- Only one banner shows at a time; a new one replaces the old.
+
+## [0.6.0] — 2026-10-09: Field kit
 
 ### Added
 - **Dodge roll** (Shift / Space, or the ROLL touch button): a quick dash of about three tiles you can't be hit during, with a short cooldown shown as a bar under your feet. The robot rolls a little shorter and recharges slower. The roll covers a fixed distance, so it behaves the same on slow devices.

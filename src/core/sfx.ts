@@ -57,6 +57,15 @@ export const SFX = {
       L({ wave: 'noise', from: 0, to: 0, duration: 0.3, volume: 0.25, delay: 0.1, filter: { type: 'bandpass', from: 2500, to: 600, q: 2 } }),
     ],
   },
+  arc: {
+    jitter: 0.08,
+    cooldownMs: 60,
+    layers: [
+      L({ wave: 'square', from: 1400, to: 300, duration: 0.14, volume: 0.14, filter: { type: 'bandpass', from: 3000, to: 900, q: 2 } }),
+      L({ wave: 'noise', from: 0, to: 0, duration: 0.12, volume: 0.3, filter: { type: 'highpass', from: 3500, to: 1800 } }),
+      L({ wave: 'sawtooth', from: 120, to: 90, duration: 0.1, volume: 0.1 }),
+    ],
+  },
   enemyShot: {
     jitter: 0.08,
     cooldownMs: 50,
@@ -158,6 +167,46 @@ export const SFX = {
   scan: {
     cooldownMs: 120,
     layers: [L({ wave: 'sine', from: 900, to: 1500, duration: 0.12, volume: 0.1 })],
+  },
+  bossCharge: {
+    layers: [
+      L({ wave: 'sawtooth', from: 70, to: 260, duration: 0.8, volume: 0.3, filter: { type: 'lowpass', from: 400, to: 2400 } }),
+      L({ wave: 'noise', from: 0, to: 0, duration: 0.8, volume: 0.15, filter: { type: 'bandpass', from: 300, to: 1600, q: 2 } }),
+    ],
+  },
+  bossSlam: {
+    cooldownMs: 120,
+    layers: [
+      L({ wave: 'sine', from: 90, to: 28, duration: 0.45, volume: 0.55 }),
+      L({ wave: 'noise', from: 0, to: 0, duration: 0.35, volume: 0.4, filter: { type: 'lowpass', from: 1800, to: 150 } }),
+    ],
+  },
+  bossRoar: {
+    cooldownMs: 600,
+    layers: [
+      L({ wave: 'sawtooth', from: 110, to: 55, duration: 0.9, volume: 0.25, filter: { type: 'lowpass', from: 900, to: 300 } }),
+      L({ wave: 'noise', from: 0, to: 0, duration: 0.9, volume: 0.3, filter: { type: 'bandpass', from: 500, to: 220, q: 3 } }),
+      L({ wave: 'square', from: 58, to: 52, duration: 0.7, volume: 0.06 }),
+    ],
+  },
+  bossArmour: {
+    cooldownMs: 90,
+    maxVoices: 3,
+    layers: [L({ wave: 'square', from: 1600, to: 1300, duration: 0.06, volume: 0.1, filter: { type: 'highpass', from: 900, to: 900 } })],
+  },
+  bossDie: {
+    layers: [
+      L({ wave: 'noise', from: 0, to: 0, duration: 1.6, volume: 0.45, filter: { type: 'lowpass', from: 3000, to: 80 } }),
+      L({ wave: 'sine', from: 140, to: 20, duration: 1.4, volume: 0.4 }),
+      L({ wave: 'sawtooth', from: 300, to: 40, duration: 1.2, volume: 0.1, filter: { type: 'lowpass', from: 1500, to: 200 } }),
+    ],
+  },
+  doorOpen: {
+    layers: [
+      L({ wave: 'noise', from: 0, to: 0, duration: 0.9, volume: 0.35, filter: { type: 'highpass', from: 1200, to: 300 } }),
+      L({ wave: 'square', from: 70, to: 70, duration: 0.15, volume: 0.15, delay: 0.75 }),
+      L({ wave: 'sine', from: 120, to: 60, duration: 0.25, volume: 0.3, delay: 0.75 }),
+    ],
   },
   heal: {
     layers: [

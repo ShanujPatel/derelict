@@ -32,9 +32,9 @@ export function dodgeCooldown(robot: boolean): number {
 }
 
 /** 0 just after a roll, 1 when you can roll again. */
-export function dodgeReadiness(now: number, lastDodgeAt: number, robot = false): number {
+export function dodgeReadiness(now: number, lastDodgeAt: number, robot = false, rate = 1): number {
   if (lastDodgeAt <= 0) return 1;
-  return Math.max(0, Math.min(1, (now - lastDodgeAt) / dodgeCooldown(robot)));
+  return Math.max(0, Math.min(1, ((now - lastDodgeAt) * rate) / dodgeCooldown(robot)));
 }
 
 /** Roll the way you're moving; standing still, roll the way you're aiming. */
@@ -75,6 +75,25 @@ export function rollSupplyDrop(roll: number, pick: number, hpFraction: number, o
   return pick < medkitShare ? 'medkit' : 'oxygen';
 }
 
+// ---------------------------------------------------------------- power-ups
+
+export type PowerupKind = 'overdrive' | 'aegis';
+
+export const POWERUPS = {
+  /** Overdrive: guns fire twice as fast for a while. */
+  overdriveMs: 8000,
+  overdriveRate: 2,
+  /** Aegis: a shield that soaks the next few hits. */
+  aegisHits: 2,
+  /** Chance an ordinary kill drops one; elites and bounties always do. */
+  chance: 0.04,
+} as const;
+
+export function rollPowerup(roll: number, pick: number, special: boolean): PowerupKind | null {
+  if (!special && roll >= POWERUPS.chance) return null;
+  return pick < 0.5 ? 'overdrive' : 'aegis';
+}
+
 // ---------------------------------------------------------------- explosive barrels
 
 export const BARREL = {
@@ -97,6 +116,55 @@ export function blastDamage(distance: number, max: number, radius: number = BARR
   const falloff = 1 - (distance / radius) * (2 / 3);
   return Math.max(1, Math.round(max * falloff));
 }
+
+// ---------------------------------------------------------------- shock floors
+
+/** An electrified floor patch that cycles on and off. */
+export interface Hazard {
+  x: number;
+  y: number;
+  w: number;
+  h: number;
+  /** Offset into the cycle, so patches don't all fire together. */
+  phaseMs: number;
+}
+
+export const SHOCK = {
+  periodMs: 3200,
+  /** Live for this long each cycle... */
+  onMs: 1200,
+  /** ...after flickering a warning for this long. */
+  warnMs: 600,
+  playerDamage: 12,
+  /** Enemies on a live patch take this much every tick. */
+  enemyDamage: 1,
+  enemyTickMs: 450,
+  count: { freighter: 2, research: 1 },
+} as const;
+
+export type ShockState = 'off' | 'warn' | 'on';
+
+export function shockState(time: number, phaseMs: number): ShockState {
+  const t = (((time + phaseMs) % SHOCK.periodMs) + SHOCK.periodMs) % SHOCK.periodMs;
+  if (t < SHOCK.onMs) return 'on';
+  if (t >= SHOCK.periodMs - SHOCK.warnMs) return 'warn';
+  return 'off';
+}
+
+export function onHazard(h: Hazard, tx: number, ty: number): boolean {
+  return tx >= h.x && tx < h.x + h.w && ty >= h.y && ty < h.y + h.h;
+}
+
+// ---------------------------------------------------------------- sentry tool
+
+export const SENTRY = {
+  lifetimeMs: 12000,
+  fireEveryMs: 420,
+  range: 150,
+  /** Oxygen (or battery) it costs to deploy. */
+  cost: 6,
+  cooldownMs: 1500,
+} as const;
 
 // ---------------------------------------------------------------- scanner map
 

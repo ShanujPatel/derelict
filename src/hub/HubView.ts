@@ -3,6 +3,7 @@ import { drawCharacterPreview } from '../art/textures';
 import {
   CHARACTERS,
   COSMETICS,
+  findCosmetic,
   PERKS,
   STATS,
   TOOLS,
@@ -18,6 +19,9 @@ import { leaderboard } from '../net/leaderboard';
 import { vesselName } from '../core/names';
 import { ACHIEVEMENTS } from '../core/achievements';
 import { conditionFor } from '../core/conditions';
+import { isoWeek, weeklySeed, weeklySetup } from '../core/weekly';
+import { manualSection } from './manual';
+import { BOSSES, BOSS_IDS, BOSS_UNLOCK_EXTRACTIONS, type BossId } from '../core/bosses';
 import { chooseName, ensureName, rollName, type NameResult } from '../net/names';
 import type { ShipType } from '../core/types';
 import {
@@ -30,6 +34,9 @@ import {
   priceOf,
   purchase,
   selectCharacter,
+  bossUnlocked,
+  resetTips,
+  liveStreak,
   setDestination,
   setGun,
   setLook,
@@ -42,6 +49,12 @@ import {
 } from '../core/progression';
 import { WEAPONS, type WeaponId } from '../core/weapons';
 import type { SfxName } from '../core/sfx';
+
+/** 3_725_000 ms -> "1h 02m"; under an hour -> "12m". */
+const formatHours = (ms: number) => {
+  const mins = Math.floor(ms / 60000);
+  return mins >= 60 ? `${Math.floor(mins / 60)}h ${String(mins % 60).padStart(2, '0')}m` : `${mins}m`;
+};
 
 const esc = (t: string) => t.replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[c]!);
 
@@ -56,7 +69,8 @@ const TABS: { id: Tab; label: string }[] = [
 ];
 
 export interface HubCallbacks {
-  onLaunch: (daily: boolean) => void;
+  onLaunch: (daily: boolean, boss?: BossId) => void;
+  onWeekly?: () => void;
   onSave: (save: SaveData) => void;
   onReset: () => void;
   onSound?: (name: SfxName) => void;
@@ -166,6 +180,19 @@ export class HubView {
         return this.callbacks.onLaunch(false);
       case 'daily':
         return this.callbacks.onLaunch(true);
+      case 'reset-tips':
+        this.update(resetTips(this.save));
+        return this.toast('Tips will show again');
+      case 'weekly':
+        return this.callbacks.onWeekly?.();
+      case 'boss': {
+        const id = d.boss as BossId;
+        if (!bossUnlocked(this.save, id)) {
+          this.sound('denied');
+          return this.toast(this.bossLockReason(id), true);
+        }
+        return this.callbacks.onLaunch(false, id);
+      }
       case 'buy':
         return this.buy(JSON.parse(d.item!) as ShopItem, d.label ?? 'Purchased');
       case 'character': {
@@ -181,6 +208,11 @@ export class HubView {
           id: d.id!,
         };
         if (owns(this.save, item)) return this.update(setLook(this.save, item.character, item.slot, item.id));
+        const trophy = findCosmetic(item.character, item.slot, item.id).trophy;
+        if (trophy) {
+          this.sound('denied');
+          return this.toast(`🏆 Trophy colours: ${trophy.label} to unlock`, true);
+        }
         return this.buy(item, 'New colours applied');
       }
       case 'gun':
@@ -395,11 +427,15 @@ export class HubView {
     const swatches = (slot: 'body' | 'accent') =>
       COSMETICS[c.id][slot]
         .map((o) => {
-          const tag = this.priceTag({ kind: 'cosmetic', character: c.id, slot, id: o.id });
+          const item = { kind: 'cosmetic', character: c.id, slot, id: o.id } as const;
+          const tag = this.priceTag(item);
           const colour = slot === 'body' ? (o.colours.b ?? o.colours.s) : (o.colours.v ?? o.colours.e);
-          return `<button class="swatch ${tag.cls}" data-action="look" data-slot="${slot}" data-id="${o.id}"
-            aria-pressed="${s.loadout.looks[c.id][slot] === o.id}" title="${o.name}${tag.label ? ` (${tag.label})` : ''}">
-            <i style="background:${colour}"></i>${tag.label}
+          const trophyLocked = !!o.trophy && !owns(s, item);
+          const label = o.trophy ? '🏆' : tag.label;
+          const title = o.trophy ? `${o.name}: ${trophyLocked ? `trophy, ${o.trophy.label}` : 'trophy'}` : `${o.name}${tag.label ? ` (${tag.label})` : ''}`;
+          return `<button class="swatch ${tag.cls} ${o.trophy ? 'trophy' : ''} ${trophyLocked ? 'locked' : ''}" data-action="look" data-slot="${slot}" data-id="${o.id}"
+            aria-pressed="${s.loadout.looks[c.id][slot] === o.id}" title="${esc(title)}">
+            <i style="background:${colour}"></i>${label}
           </button>`;
         })
         .join('');
@@ -471,7 +507,10 @@ export class HubView {
         ${missing ? `<p class="hub-note" style="margin-top:8px">${missing} more perk${missing > 1 ? 's' : ''} available in Upgrades.</p>` : ''}
       </section>
       <section class="hub-section"><h3>Tool · F / right-click</h3><div class="choices">${tools}</div>
-        ${s.tools.length < Object.keys(TOOLS).length ? '<p class="hub-note" style="margin-top:8px">The hacking tool is for sale in Upgrades.</p>' : ''}
+        ${(() => {
+          const forSale = (Object.keys(TOOLS) as ToolId[]).filter((id) => !s.tools.includes(id)).map((id) => TOOLS[id].name);
+          return forSale.length ? `<p class="hub-note" style="margin-top:8px">For sale in Upgrades: ${forSale.join(', ')}.</p>` : '';
+        })()}
       </section>`;
   }
 
@@ -588,11 +627,60 @@ export class HubView {
         <div class="daily-vessel">${mission.vessel}</div>
         <div class="daily-condition"><b>${mission.condition.name.toUpperCase()}</b> ${mission.condition.blurb}</div>
         <p class="hub-note">${mission.threat} Same ship for everyone today. Extract to post your salvage; only your best run counts. Ties go to the faster run.</p>
-        <div class="daily-best">Your best today <b>${best ?? '—'}</b></div>
+        <div class="daily-best">Your best today <b>${best ?? '—'}</b>${(() => {
+          const n = liveStreak(this.save, day);
+          return n ? ` <span class="streak">🔥 ${n}-day streak${this.save.streak.best > n ? ` · best ${this.save.streak.best}` : ''}</span>` : '';
+        })()}</div>
+        <p class="hub-note">Extract once a day to build a streak: +10 salvage per day in a row (up to +70).</p>
         <div class="btn-row"><button class="btn daily-play theme-${mission.ship}" data-action="daily">BOARD ${mission.vessel} ▸</button></div>
       </section>
+      ${this.weeklySection()}
+      ${this.contractsSection()}
       <section class="hub-section"><h3>Top salvagers · ${day}</h3>${board}</section>
       <p class="hub-note">Posting as <b>${esc(this.save.callsign)}</b>. Change your name in <button class="text-link" data-tab="crew">CREW</button>. No account needed; your save code carries it to other devices.</p>`;
+  }
+
+  /** This week's challenge: ship, mutators, your best. */
+  private weeklySection(): string {
+    const seed = weeklySeed(new Date());
+    const week = isoWeek(new Date());
+    const { ship, mutators } = weeklySetup(seed);
+    const best = this.save.weekly.week === week ? this.save.weekly.best : null;
+    return `<section class="hub-section"><h3>Weekly challenge · ${week}</h3>
+      <article class="card weekly-card">
+        <div class="daily-head"><span>${vesselName(seed, ship)}</span><b>${ship === 'research' ? '☣ RESEARCH VESSEL' : '⛭ FREIGHTER'}</b></div>
+        <ul class="mutators">${mutators.map((m) => `<li><b>${m.name.toUpperCase()}</b> ${m.blurb}</li>`).join('')}</ul>
+        <div class="daily-best">Your best this week <b>${best ?? '—'}</b></div>
+        <div class="btn-row"><button class="btn weekly-play" data-action="weekly">PLAY THE WEEKLY ▸</button></div>
+      </article>
+    </section>`;
+  }
+
+  private bossLockReason(id: BossId): string {
+    const left = BOSS_UNLOCK_EXTRACTIONS - this.save.stats.extractions;
+    if (left > 0) return `Extract ${left} more time${left === 1 ? '' : 's'} to take boss contracts`;
+    return BOSSES[id].ship === 'research' ? 'Find the coordinates log to reach research vessels first' : 'Locked';
+  }
+
+  /** Boss contracts: one card per boss, with how to beat it and your record. */
+  private contractsSection(): string {
+    const cards = BOSS_IDS.map((id) => {
+      const b = BOSSES[id];
+      const rec = this.save.bosses[id];
+      const open = bossUnlocked(this.save, id);
+      const record = rec.kills
+        ? `<span class="c-record">★ DEFEATED ×${rec.kills} · BEST ${formatDuration(rec.bestMs)}</span>`
+        : `<span class="c-record">FIRST KILL +${b.firstKillReward}</span>`;
+      return `<article class="contract theme-${b.ship} ${open ? '' : 'locked'}">
+        <header><b>${b.name}</b><small>${b.arena.toUpperCase()} · ${b.ship === 'research' ? 'RESEARCH VESSEL' : 'FREIGHTER'}</small></header>
+        <p>${b.blurb}</p>
+        <ul>${b.tips.map((t) => `<li>${t}</li>`).join('')}</ul>
+        <footer>${record}
+          <button class="btn daily-play" data-action="boss" data-boss="${id}">${open ? 'TAKE CONTRACT ▸' : `🔒 ${esc(this.bossLockReason(id).toUpperCase())}`}</button>
+        </footer>
+      </article>`;
+    }).join('');
+    return `<section class="hub-section"><h3>Boss contracts</h3><div class="contracts">${cards}</div></section>`;
   }
 
   private settingsSection(): string {
@@ -602,7 +690,7 @@ export class HubView {
         <span>${label}</span>
         <input type="range" min="0" max="100" step="5" value="${Math.round(st[key] * 100)}" data-setting="${key}" aria-label="${label} volume" />
       </label>`;
-    const toggle = (key: 'screenShake' | 'flashes', label: string) => `
+    const toggle = (key: 'screenShake' | 'flashes' | 'minimap' | 'assist' | 'tips', label: string) => `
       <label class="setting toggle">
         <span>${label}</span>
         <input type="checkbox" ${st[key] ? 'checked' : ''} data-setting="${key}" />
@@ -616,6 +704,15 @@ export class HubView {
         ${toggle('flashes', 'Damage flashes')}
         <p class="hub-note">All sound is synthesised live in your browser. Press M any time to mute.</p>
       </div>
+    </section>
+    <section class="hub-section"><h3>Assist &amp; accessibility</h3>
+      <div class="card settings">
+        ${toggle('tips', 'First-time tips')}
+        ${toggle('minimap', 'Corner minimap')}
+        ${toggle('assist', 'Assist mode')}
+        <div class="btn-row"><button class="btn ghost" data-action="reset-tips">SHOW TIPS AGAIN (${this.save.tips.length} SEEN)</button></div>
+        <p class="hub-note">Assist mode gives you 50% more oxygen or battery and halves the damage you take. Daily runs played with it on aren't posted to the leaderboard. Turn off screen shake and damage flashes above if motion bothers you.</p>
+      </div>
     </section>`;
   }
 
@@ -626,7 +723,12 @@ export class HubView {
       const entries = CODEX.filter((e) => e.chapter === chapter.id)
         .map((e, i) => {
           if (!found.includes(e.id)) {
-            const where = e.ship === 'research' ? 'research vessel' : 'freighter';
+            const where =
+              e.source && e.source !== 'ship'
+                ? `carried by ${e.source === 'foreman' ? 'the Foreman' : 'the Bloom Mother'}`
+                : e.ship === 'research'
+                  ? 'research vessel'
+                  : 'freighter';
             return `<div class="log locked"><span class="log-n">${String(i + 1).padStart(2, '0')}</span> ??? <small>Not yet recovered · ${where}</small></div>`;
           }
           return `<details class="log">
@@ -641,9 +743,62 @@ export class HubView {
         : `<span class="log-reward">Complete for +${chapter.reward} salvage</span>`;
       return `<section class="hub-section"><h3>Codex · Chapter ${chapter.id}: ${chapter.title} · ${progress.found}/${progress.total}</h3>
         <div class="logs">${entries}</div>${reward}
-        <p class="hub-note" style="margin-top:6px">One data log is hidden deep in each ship. You keep logs even if you don't make it out.</p>
+        <p class="hub-note" style="margin-top:6px">${
+          chapter.id === 1
+            ? "One data log is hidden deep in each ship. You keep logs even if you don't make it out."
+            : 'Chapter 2 logs turn up on ships once chapter 1 is read; two are only carried by the bosses.'
+        }</p>
       </section>`;
     }).join('');
+  }
+
+  /** Personal bests across every mode. */
+  private bestsSection(): string {
+    const s = this.save;
+    const st = s.stats;
+    const fmtBoss = (ms: number) => (ms ? formatDuration(ms) : '—');
+    const week = isoWeek(new Date());
+    const rows: [string, string][] = [
+      ['Biggest haul', st.bestHaul ? `${st.bestHaul} salvage` : '—'],
+      ["Today's daily", s.daily.day === this.today() ? `${s.daily.best} salvage` : '—'],
+      ["This week's challenge", s.weekly.week === week ? `${s.weekly.best} salvage` : '—'],
+      ['Deepest dive', st.deepestDive > 1 ? `Depth ${st.deepestDive}` : '—'],
+      ['Longest combo', st.bestCombo > 1 ? `${st.bestCombo} pickups` : '—'],
+      ['Daily streak', s.streak.best ? `${s.streak.best} days` : '—'],
+      ['Bounties claimed', String(st.bountiesClaimed)],
+      ['Fastest Foreman', fmtBoss(s.bosses.foreman.bestMs)],
+      ['Fastest Bloom Mother', fmtBoss(s.bosses.mother.bestMs)],
+    ];
+    return `<section class="hub-section"><h3>Personal bests</h3>
+      <dl class="bests">${rows.map(([k, v]) => `<div><dt>${k}</dt><dd>${v}</dd></div>`).join('')}</dl>
+    </section>`;
+  }
+
+  /** The last few runs, newest first. */
+  private historySection(): string {
+    const runs = this.save.history;
+    if (!runs.length) return '';
+    const rows = runs
+      .map((r) => {
+        const when = new Date(r.at).toLocaleString('en-GB', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' });
+        const what = r.boss
+          ? BOSSES[r.boss].name.replace('THE ', '')
+          : r.mode === 'daily'
+            ? 'DAILY'
+            : r.ship === 'research'
+              ? 'RESEARCH'
+              : 'FREIGHTER';
+        const result = r.extracted ? `+${r.salvage}` : r.abandoned ? 'ABANDONED' : 'LOST';
+        return `<li class="${r.extracted ? 'ok' : 'lost'}">
+          <span class="h-when">${when}</span>
+          <span class="h-what">${what}${r.character === 'robot' ? ' ⚙' : ''}</span>
+          <span class="h-time">${formatDuration(r.durationMs)}</span>
+          <span class="h-kills">${r.kills}✕</span>
+          <b class="h-result">${result}</b>
+        </li>`;
+      })
+      .join('');
+    return `<section class="hub-section"><h3>Recent runs</h3><ol class="history">${rows}</ol></section>`;
   }
 
   private achievementsSection(): string {
@@ -671,9 +826,18 @@ export class HubView {
           ${stat(st.totalBanked, 'TOTAL BANKED')}
           ${stat(st.dronesDestroyed, 'HOSTILES DOWN')}
           ${stat(this.save.codex.length, 'LOGS FOUND')}
+          ${stat(st.elitesKilled, 'ELITES DOWN')}
+          ${stat(st.drumsDetonated, 'DRUMS BLOWN')}
+          ${stat(st.dodges, 'ROLLS')}
+          ${stat(this.save.bosses.foreman.kills + this.save.bosses.mother.kills, 'BOSSES BEATEN')}
+          <div class="stat"><b>${formatHours(st.timeAboardMs)}</b><span>TIME ABOARD</span></div>
+          ${stat(st.extractions && st.runs ? Math.round((st.extractions / st.runs) * 100) : 0, 'EXTRACT %')}
         </div>
       </section>
+      ${this.bestsSection()}
+      ${this.historySection()}
       ${this.achievementsSection()}
+      ${manualSection()}
       ${this.codexSection()}
       ${this.settingsSection()}
       <section class="hub-section"><h3>Move your save</h3>

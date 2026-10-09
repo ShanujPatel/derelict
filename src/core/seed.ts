@@ -1,4 +1,7 @@
+import { BOSSES, BOSS_IDS, type BossId } from './bosses';
 import { SHIP_TYPES, type ShipType } from './types';
+import { weeklySeed, weeklySetup } from './weekly';
+import type { Carry } from './depth';
 
 /** FNV-1a 32-bit hash: turns a seed string into a number for the RNG. */
 export function hashString(input: string): number {
@@ -27,12 +30,16 @@ export function randomSeed(random: () => number = Math.random, length = 6): stri
   return out;
 }
 
-export type SeedMode = 'daily' | 'custom' | 'random';
+export type SeedMode = 'daily' | 'weekly' | 'custom' | 'random' | 'boss';
 
 export interface ResolvedSeed {
   seed: string;
   mode: SeedMode;
   ship: ShipType;
+  /** Set for boss contracts: the run is that boss's arena. */
+  boss?: BossId;
+  /** Deep dive: what you carried down the lift (depth 2+). */
+  carry?: Carry;
 }
 
 /** The Daily Derelict alternates ship types by date, the same for everyone. */
@@ -46,7 +53,9 @@ const parseShip = (value: string | null): ShipType =>
 /**
  * Picks the run seed from the page URL:
  *   ?daily                     -> today's Daily Derelict
+ *   ?weekly                    -> this week's challenge (ship + two mutators)
  *   ?seed=ABC123[&ship=research] -> a specific ship
+ *   ?boss=foreman[&seed=ABC123]  -> a boss contract arena
  *   (nothing)                  -> a random freighter
  */
 export function resolveSeed(
@@ -59,6 +68,15 @@ export function resolveSeed(
     const seed = dailySeed(now);
     return { seed, mode: 'daily', ship: dailyShip(seed) };
   }
+  if (params.has('weekly')) {
+    const seed = weeklySeed(now);
+    return { seed, mode: 'weekly', ship: weeklySetup(seed).ship };
+  }
+  const boss = params.get('boss') as BossId | null;
+  if (boss && BOSS_IDS.includes(boss)) {
+    const seed = params.get('seed')?.trim().slice(0, 32) || randomSeed(random);
+    return { seed, mode: 'boss', ship: BOSSES[boss].ship, boss };
+  }
   const ship = parseShip(params.get('ship'));
   const custom = params.get('seed')?.trim();
   if (custom) return { seed: custom.slice(0, 32), mode: 'custom', ship };
@@ -68,5 +86,7 @@ export function resolveSeed(
 /** Query string that reproduces a run, for the address bar and sharing. */
 export function seedQuery(run: ResolvedSeed): string {
   if (run.mode === 'daily') return '?daily';
+  if (run.mode === 'weekly') return '?weekly';
+  if (run.boss) return `?boss=${run.boss}&seed=${run.seed}`;
   return run.ship === 'freighter' ? `?seed=${run.seed}` : `?seed=${run.seed}&ship=${run.ship}`;
 }

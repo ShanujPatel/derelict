@@ -1,5 +1,5 @@
 import { THEMES, buildPhrase, midiToFreq, stepSeconds, type MusicTheme, type ThemeId } from '../core/music';
-import type { Settings } from '../core/progression';
+import { DEFAULT_SETTINGS, type Settings } from '../core/progression';
 import { SFX, sfxDuration, type SfxDef, type SfxName, type ToneLayer } from '../core/sfx';
 
 /**
@@ -88,7 +88,7 @@ export class AudioEngine {
   private master!: GainNode;
   private sfxBus!: GainNode;
   private musicBus!: GainNode;
-  private settings: Settings = { master: 0.8, music: 0.6, sfx: 0.8, screenShake: true, flashes: true };
+  private settings: Settings = { ...DEFAULT_SETTINGS };
   private muted = false;
   private lastPlayed = new Map<SfxName, number>();
   private voices = new Map<SfxName, number>();

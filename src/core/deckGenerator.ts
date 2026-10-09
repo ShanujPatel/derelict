@@ -1,7 +1,7 @@
 import { createRng, type Rng } from './rng';
 import { hashString } from './seed';
 import { bfsDistances } from './pathing';
-import { BARREL } from './fieldkit';
+import { BARREL, SHOCK, type Hazard } from './fieldkit';
 import { Tile, type Point, type Room, type ShipType, type Spawn, type SpawnKind } from './types';
 
 export interface SpawnRule {
@@ -28,6 +28,12 @@ export interface DeckOptions {
   medkits: { count: number; heal: number };
   /** Explosive fuel drums. */
   drums: number;
+  /** Mimic crates (freighters). */
+  mimics: number;
+  /** Electrified floor patches. */
+  hazards: number;
+  /** Cloaked stalkers (research vessels). */
+  stalkers: number;
 }
 
 const enemy = (count: number, minDistance: number, againstWall = false): SpawnRule => ({
@@ -56,6 +62,9 @@ export const DECK_OPTIONS: Record<ShipType, DeckOptions> = {
     ],
     medkits: { count: 3, heal: 35 },
     drums: BARREL.count.freighter,
+    mimics: 2,
+    hazards: SHOCK.count.freighter,
+    stalkers: 0,
   },
   research: {
     ship: 'research',
@@ -76,6 +85,9 @@ export const DECK_OPTIONS: Record<ShipType, DeckOptions> = {
     ],
     medkits: { count: 3, heal: 35 },
     drums: BARREL.count.research,
+    mimics: 0,
+    hazards: SHOCK.count.research,
+    stalkers: 2,
   },
 };
 
@@ -95,6 +107,8 @@ export interface Deck {
   ship: ShipType;
   /** Thin walls the cutting torch can open to make shortcuts. */
   weakWalls: Point[];
+  /** Electrified floor patches (v0.8). */
+  hazards?: Hazard[];
 }
 
 /** Builds one ship deck. Pure and deterministic: same seed + ship + options = same deck. */
@@ -133,8 +147,11 @@ export function generateDeck(seed: string, ship: ShipType = 'freighter', options
   const spawns = placeSpawns(rng, rooms, tiles, dist, start, extraction, opts);
   spawns.push(...placeMedkits(seed, ship, rooms, tiles, dist, spawns, [start, extraction], opts.medkits));
   spawns.push(...placeDrums(seed, ship, rooms, tiles, dist, spawns, [start, extraction], opts.drums));
+  spawns.push(...placeMimics(seed, ship, rooms, tiles, dist, spawns, [start, extraction], opts.mimics));
+  spawns.push(...placeMimics(`${seed}:stalkers`, ship, rooms, tiles, dist, spawns, [start, extraction], opts.stalkers, 'stalker'));
 
-  return { seed, ship, width, height, tiles, rooms, start, extraction, spawns, weakWalls };
+  const hazards = placeHazards(seed, ship, rooms, extraction, opts.hazards);
+  return { seed, ship, width, height, tiles, rooms, start, extraction, spawns, weakWalls, hazards };
 }
 
 function centre(r: Room): Point {
@@ -332,6 +349,57 @@ function placeDrums(
     }
   }
   return drums;
+}
+
+/**
+ * Shock floors: a patch in the middle of a few rooms (never the first room or
+ * the exit's room), on their own random stream like everything added later.
+ */
+function placeHazards(seed: string, ship: ShipType, rooms: Room[], extraction: Point, count: number): Hazard[] {
+  const rng = createRng(hashString(`${seed}:${ship}:hazards`));
+  const inRoom = (p: Point, r: Room) => p.x >= r.x && p.x < r.x + r.w && p.y >= r.y && p.y < r.y + r.h;
+  const candidates = rooms.slice(1).filter((r) => r.w >= 5 && r.h >= 5 && !inRoom(extraction, r));
+  const hazards: Hazard[] = [];
+  for (let i = 0; i < count && candidates.length; i++) {
+    const r = candidates.splice(rng.int(0, candidates.length - 1), 1)[0];
+    const w = Math.min(r.w - 2, rng.int(2, 4));
+    const h = Math.min(r.h - 2, rng.int(2, 3));
+    hazards.push({
+      x: rng.int(r.x + 1, r.x + r.w - 1 - w),
+      y: rng.int(r.y + 1, r.y + r.h - 1 - h),
+      w,
+      h,
+      phaseMs: rng.int(0, SHOCK.periodMs - 1),
+    });
+  }
+  return hazards;
+}
+
+/** Mimic crates: their own random stream again, placed like loot but never near the start. */
+function placeMimics(
+  seed: string,
+  ship: ShipType,
+  rooms: Room[],
+  tiles: Tile[][],
+  dist: number[][],
+  existing: Spawn[],
+  reserved: Point[],
+  count: number,
+  kind: 'mimic' | 'stalker' = 'mimic',
+): Spawn[] {
+  const rng = createRng(hashString(`${seed}:${ship}:mimics`));
+  const taken = new Set([...existing, ...reserved].map((p) => `${p.x},${p.y}`));
+  const mimics: Spawn[] = [];
+  const candidates = rooms.slice(1);
+  for (let attempt = 0; attempt < count * 80 && mimics.length < count; attempt++) {
+    const r = rng.pick(candidates);
+    const p = { x: rng.int(r.x, r.x + r.w - 1), y: rng.int(r.y, r.y + r.h - 1) };
+    const key = `${p.x},${p.y}`;
+    if (taken.has(key) || tiles[p.y][p.x] !== Tile.Floor || dist[p.y][p.x] < MIN_ENEMY_DISTANCE) continue;
+    taken.add(key);
+    mimics.push({ ...p, kind, value: 0 });
+  }
+  return mimics;
 }
 
 function placeSpawns(

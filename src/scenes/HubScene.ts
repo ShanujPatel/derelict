@@ -1,7 +1,11 @@
 import Phaser from 'phaser';
 import { dailySeed, dailyShip, randomSeed, seedQuery, type ResolvedSeed } from '../core/seed';
 import { HubView } from '../hub/HubView';
+import { BOSSES, type BossId } from '../core/bosses';
+import { weeklySeed, weeklySetup } from '../core/weekly';
 import { audio } from '../audio/engine';
+import { pad } from '../ui/Gamepad';
+import { PAD } from '../core/gamepad';
 import { clearSave, loadSave, storeSave } from '../storage';
 
 /** Between runs: a drifting starfield behind the HTML hub screens. */
@@ -29,7 +33,8 @@ export class HubScene extends Phaser.Scene {
     this.view = new HubView(loadSave(), {
       onSave: storeSave,
       onReset: clearSave,
-      onLaunch: (daily) => this.launch(daily),
+      onLaunch: (daily, boss) => this.launch(daily, boss),
+      onWeekly: () => this.launchRun({ seed: weeklySeed(new Date()), mode: 'weekly', ship: weeklySetup(weeklySeed(new Date())).ship }),
       onSound: (name) => audio.play(name),
       onSettings: (settings) => audio.setSettings(settings),
     });
@@ -40,6 +45,10 @@ export class HubScene extends Phaser.Scene {
   }
 
   update(_time: number, delta: number) {
+    // Gamepad in the hub: Start or A launches, Y boards today's daily ship.
+    pad.poll();
+    if (this.view && (pad.justPressed(PAD.START) || pad.justPressed(PAD.A))) return this.launch(false);
+    if (this.view && pad.justPressed(PAD.Y)) return this.launch(true);
     const { width, height } = this.scale;
     for (const s of this.stars) {
       s.img.x -= (s.speed * delta) / 1000;
@@ -47,11 +56,17 @@ export class HubScene extends Phaser.Scene {
     }
   }
 
-  private launch(daily: boolean) {
+  private launch(daily: boolean, boss?: BossId) {
     const today = dailySeed(new Date());
-    const run: ResolvedSeed = daily
-      ? { seed: today, mode: 'daily', ship: dailyShip(today) }
-      : { seed: randomSeed(), mode: 'random', ship: loadSave().loadout.destination };
+    const run: ResolvedSeed = boss
+      ? { seed: randomSeed(), mode: 'boss', ship: BOSSES[boss].ship, boss }
+      : daily
+        ? { seed: today, mode: 'daily', ship: dailyShip(today) }
+        : { seed: randomSeed(), mode: 'random', ship: loadSave().loadout.destination };
+    this.launchRun(run);
+  }
+
+  private launchRun(run: ResolvedSeed) {
     try {
       window.history.replaceState(null, '', seedQuery(run));
     } catch {

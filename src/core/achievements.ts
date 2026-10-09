@@ -22,6 +22,15 @@ export interface RunSummary {
   rivalsBoarded: number;
   hacks: number;
   elitesKilled: number;
+  /** The boss you beat this run, if any. */
+  bossKilled: 'foreman' | 'mother' | null;
+  /** A weekly challenge run. */
+  weekly: boolean;
+  bounties: number;
+  /** Longest salvage combo chain. */
+  bestCombo: number;
+  /** Deck you ended on (deep dives). */
+  depth: number;
 }
 
 export interface Achievement {
@@ -116,6 +125,48 @@ export const ACHIEVEMENTS: readonly Achievement[] = [
     description: 'Destroy 3 elite hostiles in one run.',
     reward: 70,
     earned: (r) => r.elitesKilled >= 3,
+  },
+  {
+    id: 'fired',
+    name: 'Fired',
+    description: 'Defeat the Foreman.',
+    reward: 60,
+    earned: (r) => r.bossKilled === 'foreman',
+  },
+  {
+    id: 'root-and-branch',
+    name: 'Root and branch',
+    description: 'Defeat the Bloom Mother.',
+    reward: 60,
+    earned: (r) => r.bossKilled === 'mother',
+  },
+  {
+    id: 'bounty-hunter',
+    name: 'Bounty hunter',
+    description: 'Claim a bounty and extract.',
+    reward: 50,
+    earned: (r) => r.extracted && r.bounties > 0,
+  },
+  {
+    id: 'hoover',
+    name: 'Hoover',
+    description: 'Chain 6 salvage pickups into a ×1.5 combo.',
+    reward: 50,
+    earned: (r) => r.bestCombo >= 6,
+  },
+  {
+    id: 'deep-diver',
+    name: 'Deep diver',
+    description: 'Take the lift down to depth 3 and extract.',
+    reward: 80,
+    earned: (r) => r.extracted && r.depth >= 3,
+  },
+  {
+    id: 'mutant',
+    name: 'Mutant',
+    description: 'Extract from a Weekly Challenge.',
+    reward: 60,
+    earned: (r) => r.weekly && r.extracted,
   },
   {
     id: 'daily-driver',

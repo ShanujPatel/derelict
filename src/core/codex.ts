@@ -1,3 +1,4 @@
+import type { BossId } from './bosses';
 import type { ShipType } from './types';
 
 /**
@@ -11,6 +12,8 @@ export interface LogEntry {
   title: string;
   author: string;
   body: string;
+  /** Where it's found: a data log on a ship (default), or carried by a boss. */
+  source?: 'ship' | BossId;
 }
 
 export interface Chapter {
@@ -20,7 +23,10 @@ export interface Chapter {
   reward: number;
 }
 
-export const CHAPTERS: Chapter[] = [{ id: 1, title: 'The Halcyon Contract', reward: 150 }];
+export const CHAPTERS: Chapter[] = [
+  { id: 1, title: 'The Halcyon Contract', reward: 150 },
+  { id: 2, title: 'The Gravecutter Ledger', reward: 250 },
+];
 
 /** Reading this log reveals where the research vessels are. */
 export const RESEARCH_UNLOCK_LOG = 'c1-03';
@@ -116,10 +122,84 @@ export const CODEX: LogEntry[] = [
       'matches the AI core traffic, signal for signal. Every ship it touches becomes another nest. The Gravecutters ' +
       'are carrying cores home to Vesper-Kline. Whoever reads this: do not let them get there.',
   },
+  {
+    id: 'c2-01',
+    chapter: 2,
+    ship: 'freighter',
+    title: 'Ledger page 114',
+    author: 'Ledger of the Saw-Tooth, Gravecutter crew',
+    body:
+      'Payment in full from a VKL account with no name on it: forty thousand per intact AI core, double if the ' +
+      'core is "still talking". We do not ask what that means. Twelve cores lifted this quarter. Brannick says the ' +
+      'cores hum when you stack them. Brannick has been moved to the outer hold.',
+  },
+  {
+    id: 'c2-02',
+    chapter: 2,
+    ship: 'freighter',
+    title: 'Loader firmware warning',
+    author: 'Priya Calder, Cargo Supervisor',
+    body:
+      'MERIDIAN pushed a patch to every cargo loader on the deck. F-0, the big one we call the Foreman, ' +
+      'took it first and stopped answering the yard frequency. It is still moving crates, but only toward the ' +
+      'bay doors, and it will not let anyone stand between it and the cargo. Lock the bay. Do not try to talk to it.',
+  },
+  {
+    id: 'c2-03',
+    chapter: 2,
+    ship: 'research',
+    title: 'Nest census',
+    author: 'Ewan Moray, Lab Assistant — VKL Lacuna',
+    body:
+      'Dr Lund asked me to keep counting even after the doors opened. 41 sacs on deck two, 60 on deck four. ' +
+      'They are not spreading at random: every nest is wired back toward the hatchery by root lines thin as hair. ' +
+      'Something in there is feeding them. Something in there is listening to MERIDIAN.',
+  },
+  {
+    id: 'c2-04',
+    chapter: 2,
+    ship: 'research',
+    title: 'Field notes, hatchery deck',
+    author: 'Ledger of the Saw-Tooth, Gravecutter crew',
+    body:
+      'Job went bad. The hatchery has a queen, or a mother, or a root, we could not agree what to call it. It ' +
+      'sings on the comms band, low, the same six notes. Doss cut one of the feeder roots and it screamed, and ' +
+      'every crawler on the ship came running. We took the cores and left Doss. The notes are still in my helmet.',
+  },
+  {
+    id: 'c2-05',
+    chapter: 2,
+    ship: 'freighter',
+    source: 'foreman',
+    title: 'F-0 task memory (recovered from the wreck)',
+    author: 'Cargo loader F-0, "the Foreman"',
+    body:
+      'TASK: PROTECT CARGO. CARGO: MERIDIAN SEED CORE 3 OF 9. DESTINATION: KLINE PRIME, VESPER-KLINE HEAD ' +
+      'OFFICE. ETA: UNKNOWN. THREATS: SALVAGERS. RESPONSE: REMOVE. NOTE APPENDED BY MERIDIAN: "When all nine ' +
+      'arrive, the company will finally understand what it paid for." [END OF MEMORY]',
+  },
+  {
+    id: 'c2-06',
+    chapter: 2,
+    ship: 'research',
+    source: 'mother',
+    title: 'The six notes',
+    author: 'Signal decoded from the Bloom Mother',
+    body:
+      'It was never a song. The six notes are a docking handshake, repeated on every VKL band. Decoded, they are a ' +
+      'list: hull registries, dozens of them, freighters and research ships across the belt, each one marked ' +
+      'NESTING. At the bottom, one more entry, still in transit: a VKL survey ship. Its course is set for Kline Prime.',
+  },
 ];
 
+/** The next log a ship's data log will hold. Boss logs aren't found on ships. */
 export function nextLogFor(found: readonly string[], ship: ShipType): LogEntry | null {
-  return CODEX.find((e) => e.ship === ship && !found.includes(e.id)) ?? null;
+  return CODEX.find((e) => e.ship === ship && (e.source ?? 'ship') === 'ship' && !found.includes(e.id)) ?? null;
+}
+
+/** The log a boss drops when it dies, if you haven't got it yet. */
+export function bossLog(found: readonly string[], boss: BossId): LogEntry | null {
+  return CODEX.find((e) => e.source === boss && !found.includes(e.id)) ?? null;
 }
 
 export function isResearchUnlocked(found: readonly string[]): boolean {

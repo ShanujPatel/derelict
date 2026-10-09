@@ -4,8 +4,16 @@ import type { WeaponId } from './weapons';
 
 export type CharacterId = 'salvager' | 'robot';
 export type StatId = 'health' | 'capacity' | 'speed';
-export type PerkId = 'scavenger' | 'cold-cutter' | 'scrapper' | 'second-wind';
-export type ToolId = 'torch' | 'hacker' | 'grav';
+export type PerkId =
+  | 'scavenger'
+  | 'cold-cutter'
+  | 'scrapper'
+  | 'second-wind'
+  | 'adrenaline'
+  | 'demolitionist'
+  | 'field-medic'
+  | 'self-repair';
+export type ToolId = 'torch' | 'hacker' | 'grav' | 'sentry';
 
 export interface CharacterDef {
   id: CharacterId;
@@ -97,12 +105,22 @@ export const PERKS: Record<PerkId, PerkDef> = {
   'cold-cutter': { id: 'cold-cutter', name: 'Cold cutter', blurb: 'Torch cuts cost almost nothing.', cost: 90 },
   scrapper: { id: 'scrapper', name: 'Scrapper', blurb: 'Every destroyed drone drops salvage.', cost: 110 },
   'second-wind': { id: 'second-wind', name: 'Second wind', blurb: 'Survive one lethal hit per run.', cost: 140 },
+  adrenaline: { id: 'adrenaline', name: 'Adrenaline', blurb: 'Dodge roll recharges twice as fast.', cost: 120 },
+  demolitionist: { id: 'demolitionist', name: 'Demolitionist', blurb: 'Fuel drum blasts are 40% bigger and never hurt you.', cost: 120 },
+  'self-repair': {
+    id: 'self-repair',
+    name: 'Self-repair (robot)',
+    blurb: 'Robot only: out of combat for 4 seconds, it turns battery into hull repairs.',
+    cost: 130,
+  },
+  'field-medic': { id: 'field-medic', name: 'Field medic', blurb: 'Health packs and repair kits heal 60% more.', cost: 100 },
 };
 
 export const WEAPON_COSTS: Record<WeaponId, number> = {
   blaster: 0,
   scattergun: 0,
   railgun: 180,
+  arc: 220,
 };
 
 export interface ToolDef {
@@ -120,6 +138,12 @@ export const TOOLS: Record<ToolId, ToolDef> = {
     blurb: 'Turns turrets to your side and opens locked caches. Stand close and hold still.',
     cost: 160,
   },
+  sentry: {
+    id: 'sentry',
+    name: 'Sentry drone',
+    blurb: 'Deploys a little auto-turret that shoots nearby hostiles for 12 seconds. One at a time.',
+    cost: 220,
+  },
   grav: {
     id: 'grav',
     name: 'Grav tool',
@@ -134,6 +158,8 @@ export interface ColourOption {
   cost: number;
   /** Palette overrides applied to the character sprite. */
   colours: Record<string, string>;
+  /** Trophy colours can't be bought: they unlock with an achievement. */
+  trophy?: { achievement: string; label: string };
 }
 
 /** Body colours (suit or chassis) and accent colours (visor or eye), per character. */
@@ -145,12 +171,33 @@ export const COSMETICS: Record<CharacterId, { body: ColourOption[]; accent: Colo
       { id: 'crimson', name: 'Crimson', cost: 40, colours: { b: '#c0392b', B: '#e2685b', d: '#7f241b' } },
       { id: 'ivory', name: 'Ivory', cost: 60, colours: { b: '#cfc8b8', B: '#f4f0e6', d: '#8f897b' } },
       { id: 'gold', name: 'Gold', cost: 120, colours: { b: '#d4a017', B: '#f1c84b', d: '#8f6b0c' } },
+      {
+        id: 'foreman',
+        name: "Foreman's hazard rig",
+        cost: 0,
+        colours: { b: '#2b2b2b', B: '#ffd166', d: '#121212' },
+        trophy: { achievement: 'fired', label: 'Beat the Foreman' },
+      },
+      {
+        id: 'mutant',
+        name: 'Mutant violet',
+        cost: 0,
+        colours: { b: '#7a4fc9', B: '#c9a0ff', d: '#4a2d80' },
+        trophy: { achievement: 'mutant', label: 'Extract from a Weekly Challenge' },
+      },
     ],
     accent: [
       { id: 'cyan', name: 'Cyan visor', cost: 0, colours: { v: '#3fa7d6', w: '#d8f6ff' } },
       { id: 'lime', name: 'Lime visor', cost: 30, colours: { v: '#4fb83f', w: '#d9ffcf' } },
       { id: 'amber', name: 'Amber visor', cost: 30, colours: { v: '#d9922c', w: '#fff0c9' } },
       { id: 'magenta', name: 'Magenta visor', cost: 50, colours: { v: '#b9409f', w: '#ffd6f5' } },
+      {
+        id: 'gilded',
+        name: 'Gilded visor',
+        cost: 0,
+        colours: { v: '#f1c84b', w: '#fff8d6' },
+        trophy: { achievement: 'heavy-hauler', label: 'Extract with 300+ salvage' },
+      },
     ],
   },
   robot: {
@@ -160,12 +207,26 @@ export const COSMETICS: Record<CharacterId, { body: ColourOption[]; accent: Colo
       { id: 'cobalt', name: 'Cobalt', cost: 40, colours: { s: '#3f6fb5', d: '#284a7d' } },
       { id: 'graphite', name: 'Graphite', cost: 60, colours: { s: '#4a4f5a', d: '#2e3239' } },
       { id: 'rust', name: 'Rust', cost: 80, colours: { s: '#b5653f', d: '#7a3f25' } },
+      {
+        id: 'bloom',
+        name: 'Bloom-grown chassis',
+        cost: 0,
+        colours: { s: '#5a2a6e', d: '#2f7f6a' },
+        trophy: { achievement: 'root-and-branch', label: 'Beat the Bloom Mother' },
+      },
     ],
     accent: [
       { id: 'cyan', name: 'Cyan optics', cost: 0, colours: { e: '#5ef2ff', C: '#5ef2ff' } },
       { id: 'red', name: 'Red optics', cost: 30, colours: { e: '#ff3b4e', C: '#ff3b4e' } },
       { id: 'lime', name: 'Lime optics', cost: 30, colours: { e: '#7dff6a', C: '#7dff6a' } },
       { id: 'amber', name: 'Amber optics', cost: 50, colours: { e: '#ffb43b', C: '#ffb43b' } },
+      {
+        id: 'ghost',
+        name: 'Ghost optics',
+        cost: 0,
+        colours: { e: '#f2f6ff', C: '#f2f6ff' },
+        trophy: { achievement: 'ghost', label: 'Earn the Ghost achievement' },
+      },
     ],
   },
 };

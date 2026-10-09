@@ -1,3 +1,5 @@
+import { DEPTH, baseSeed, deeperSeed, depthMods, placeLift } from '../src/core/depth';
+import { bfsDistances } from '../src/core/pathing';
 import { describe, expect, it } from 'vitest';
 import { CONDITIONS, conditionFor, isElite } from '../src/core/conditions';
 import { generateDeck } from '../src/core/deckGenerator';
@@ -14,6 +16,11 @@ import {
   isExplored,
   reveal,
   rollSupplyDrop,
+  POWERUPS,
+  rollPowerup,
+  SHOCK,
+  onHazard,
+  shockState,
 } from '../src/core/fieldkit';
 import { Tile } from '../src/core/types';
 
@@ -139,5 +146,62 @@ describe('ship conditions and elites', () => {
     expect(share(0.08)).toBeGreaterThan(0.04);
     expect(share(0.08)).toBeLessThan(0.13);
     expect(share(0.3)).toBeGreaterThan(share(0.08));
+  });
+});
+
+describe('shock floors', () => {
+  it('cycle live, off, then warn before going live again', () => {
+    expect(shockState(0, 0)).toBe('on');
+    expect(shockState(SHOCK.onMs + 10, 0)).toBe('off');
+    expect(shockState(SHOCK.periodMs - 10, 0)).toBe('warn');
+    expect(shockState(SHOCK.periodMs, 0)).toBe('on');
+    expect(shockState(0, SHOCK.periodMs - 10)).toBe('warn');
+  });
+
+  it('know which tiles they cover', () => {
+    const h = { x: 2, y: 3, w: 3, h: 2, phaseMs: 0 };
+    expect(onHazard(h, 2, 3)).toBe(true);
+    expect(onHazard(h, 4, 4)).toBe(true);
+    expect(onHazard(h, 5, 4)).toBe(false);
+    expect(onHazard(h, 2, 5)).toBe(false);
+  });
+});
+
+describe('deep dive', () => {
+  it('gets harder and richer each level down, up to the cap', () => {
+    expect(depthMods(1)).toEqual({ eliteBonus: 0, salvage: 1, enemySpeed: 1 });
+    expect(depthMods(3).salvage).toBeCloseTo(1.5);
+    expect(depthMods(99)).toEqual(depthMods(DEPTH.max));
+  });
+
+  it('names deeper decks after the first', () => {
+    expect(deeperSeed('ABC', 2)).toBe('ABC-D2');
+    expect(deeperSeed('ABC-D2', 3)).toBe('ABC-D3');
+    expect(baseSeed('ABC-D4')).toBe('ABC');
+  });
+
+  it('puts the lift far from the start, off the exit room and any spawn', () => {
+    let placed = 0;
+    for (let i = 0; i < 60; i++) {
+      const deck = generateDeck(`lift-${i}`);
+      const dist = bfsDistances(deck.tiles, deck.start);
+      const lift = placeLift(deck, dist);
+      if (!lift) continue;
+      placed++;
+      expect(deck.tiles[lift.y][lift.x]).toBe(Tile.Floor);
+      expect(dist[lift.y][lift.x]).toBeGreaterThanOrEqual(Math.max(...dist.flat()) * 0.5);
+      expect(deck.spawns.some((s) => s.x === lift.x && s.y === lift.y)).toBe(false);
+      expect(lift).not.toEqual(deck.extraction);
+    }
+    expect(placed).toBeGreaterThan(50);
+  });
+});
+
+describe('power-ups', () => {
+  it('always drop from elites and bounties, rarely otherwise', () => {
+    expect(rollPowerup(0.99, 0.2, true)).toBe('overdrive');
+    expect(rollPowerup(0.99, 0.8, true)).toBe('aegis');
+    expect(rollPowerup(0.99, 0.2, false)).toBeNull();
+    expect(rollPowerup(POWERUPS.chance / 2, 0.2, false)).toBe('overdrive');
   });
 });

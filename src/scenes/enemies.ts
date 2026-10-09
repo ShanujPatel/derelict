@@ -26,6 +26,10 @@ export const ENEMY_STATS: Record<EnemyKind, EnemyStats> = {
   egg: { hp: 3, contactDamage: 0, solid: true, speed: 0, sight: 140, drop: [1, 6, 12], radius: 5, offset: 1, shadowY: 7 },
   turret: { hp: 5, contactDamage: 0, solid: true, speed: 0, sight: 170, drop: [0.6, 6, 12], radius: 6, offset: 1, shadowY: 0 },
   raider: { hp: 4, contactDamage: 8, solid: false, speed: 62, sight: 180, drop: [0.8, 6, 14], radius: 5, offset: 2, shadowY: 7 },
+  /** Research vessels only: nearly invisible until it's close or hurt. */
+  stalker: { hp: 2, contactDamage: 10, solid: false, speed: 104, sight: 150, drop: [0.5, 6, 12], radius: 4, offset: 1, shadowY: 0 },
+  /** Freighters only: sits looking like a salvage crate until you get close. */
+  mimic: { hp: 4, contactDamage: 14, solid: false, speed: 76, sight: 160, drop: [1, 20, 35], radius: 5, offset: 0, shadowY: 0 },
   brute: { hp: 8, contactDamage: 16, solid: false, speed: 48, sight: 200, drop: [1, 10, 18], radius: 6, offset: 2, shadowY: 8 },
 };
 
@@ -33,6 +37,8 @@ export const ENEMY_STATS: Record<EnemyKind, EnemyStats> = {
 export const RIVAL_KINDS: readonly EnemyKind[] = ['raider', 'brute'];
 
 const TURRET_COOLDOWN = 1300;
+/** How long a turret's laser sight shows before it fires. */
+export const TURRET_LOCK_MS = 550;
 const SPITTER_COOLDOWN = 1700;
 const EGG_COOLDOWN = 4500;
 const EGG_BROOD = 3;
@@ -78,6 +84,10 @@ export function updateEnemy(e: Sprite, world: EnemyWorld, time: number) {
   }
 
   if (kind === 'turret') return updateTurret(e, world, time, stats);
+  // Mimics ignore line of sight while dormant: they only wake when you're right next to them.
+  if (kind === 'mimic') {
+    return updateMimic(e, world, time, stats, Phaser.Math.Distance.Between(e.x, e.y, world.player.x, world.player.y));
+  }
 
   const p = world.player;
   const dist = Phaser.Math.Distance.Between(e.x, e.y, p.x, p.y);
@@ -121,6 +131,17 @@ export function updateEnemy(e: Sprite, world: EnemyWorld, time: number) {
     case 'raider':
       return updateRaider(e, world, time, stats, dist, sees);
 
+    case 'stalker': {
+      // Cloaked: a faint shimmer, until it's within striking range or has been hit.
+      const revealed = dist < STALKER_REVEAL || time < (e.getData('revealedUntil') ?? 0);
+      e.setAlpha(revealed ? 1 : 0.07 + 0.05 * Math.sin(time / 130));
+      if (alert || dist < 90) world.moveTowards(e, p, stats.speed);
+      else wander(e, time, 30);
+      faceVelocity(e);
+      return;
+    }
+
+
     case 'brute':
       if (sees) world.moveTowards(e, p, stats.speed);
       else world.followPath(e, p, stats.speed);
@@ -140,6 +161,34 @@ export function updateEnemy(e: Sprite, world: EnemyWorld, time: number) {
       return;
     }
   }
+}
+
+export const MIMIC_TRIGGER = 34;
+const STALKER_REVEAL = 52;
+const MIMIC_LUNGE_MS = 550;
+
+/** Mimic: dormant crate until you're close (or it's shot), then a lunge and a chase. */
+function updateMimic(e: Sprite, world: EnemyWorld, time: number, stats: EnemyStats, dist: number) {
+  const p = world.player;
+  if (e.getData('dormant')) {
+    e.setVelocity(0, 0);
+    if (dist < MIMIC_TRIGGER) wakeMimic(e, world, time);
+    return;
+  }
+  if (time < (e.getData('lungeUntil') ?? 0)) return;
+  world.moveTowards(e, p, stats.speed);
+  e.setFrame(Math.floor(time / 140) % 2 === 0 ? 1 : 2);
+  faceVelocity(e);
+}
+
+export function wakeMimic(e: Sprite, world: EnemyWorld, time: number) {
+  if (!e.getData('dormant')) return;
+  e.setData({ dormant: false, lungeUntil: time + MIMIC_LUNGE_MS, alertUntil: time + 8000 });
+  e.setFrame(1);
+  const a = Phaser.Math.Angle.Between(e.x, e.y, world.player.x, world.player.y);
+  e.setVelocity(Math.cos(a) * 190, Math.sin(a) * 190);
+  e.scene.tweens.add({ targets: e, scaleX: 1.3, scaleY: 1.3, yoyo: true, duration: 110 });
+  world.soundAt('hatch', e.x, e.y);
 }
 
 function updateTurret(e: Sprite, world: EnemyWorld, time: number, stats: EnemyStats) {
@@ -163,7 +212,12 @@ function updateTurret(e: Sprite, world: EnemyWorld, time: number, stats: EnemySt
 
   if (!target) {
     barrel.rotation += 0.004; // idle sweep
+    e.setData('tracking', false);
     return;
+  }
+  // Newly spotted you: a short lock-on (shown as a laser sight) before the first shot.
+  if (!isHacked(e) && !e.getData('tracking')) {
+    e.setData({ tracking: true, nextShot: Math.max(e.getData('nextShot') ?? 0, time + TURRET_LOCK_MS) });
   }
   const want = Phaser.Math.Angle.Between(e.x, e.y, target.x, target.y);
   barrel.rotation = Phaser.Math.Angle.RotateTo(barrel.rotation, want, 0.06);

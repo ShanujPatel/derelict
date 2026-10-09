@@ -17,6 +17,8 @@ import {
 } from './catalog';
 import { CHAPTERS, CODEX, chapterProgress, isResearchUnlocked } from './codex';
 import { ACHIEVEMENT_IDS, type Achievement } from './achievements';
+import { TIP_IDS, type TipId } from './tips';
+import { BOSSES, BOSS_IDS, BOSS_UNLOCK_EXTRACTIONS, emptyBossRecords, type BossId, type BossRecord } from './bosses';
 import { SHIP_TYPES, type ShipType } from './types';
 import { cleanCallsign } from './leaderboard';
 import { hashString } from './seed';
@@ -39,6 +41,10 @@ export interface SaveData {
   rewards: string[];
   /** Achievement ids earned (each pays once). */
   achievements: string[];
+  /** Boss contract results. */
+  bosses: Record<BossId, BossRecord>;
+  /** First-time tips already shown. */
+  tips: string[];
   /** Anonymous id for the leaderboard; set by storage on first load. */
   playerId: string;
   /** Your name, shown on the leaderboard. */
@@ -47,6 +53,10 @@ export interface SaveData {
   callsignClaimed: string;
   /** Best extracted score on today's Daily Derelict. */
   daily: { day: string; best: number };
+  /** Best extracted score on this week's challenge. */
+  weekly: { week: string; best: number };
+  /** Consecutive days with a Daily Derelict extraction. */
+  streak: { lastDay: string; count: number; best: number };
   settings: Settings;
   /** Bought cosmetics, as cosmeticKey() strings. Free options are always owned. */
   cosmetics: string[];
@@ -65,7 +75,36 @@ export interface SaveData {
     bestHaul: number;
     totalBanked: number;
     dronesDestroyed: number;
+    /** Lifetime counters added in v0.8. */
+    dodges: number;
+    drumsDetonated: number;
+    elitesKilled: number;
+    timeAboardMs: number;
+    /** Personal bests added in v0.8. */
+    deepestDive: number;
+    bestCombo: number;
+    bountiesClaimed: number;
   };
+  /** The most recent runs, newest first (at most HISTORY_LIMIT). */
+  history: RunRecord[];
+}
+
+export const HISTORY_LIMIT = 10;
+
+export interface RunRecord {
+  /** ISO time the run ended. */
+  at: string;
+  ship: ShipType;
+  mode: 'daily' | 'weekly' | 'custom' | 'random' | 'boss';
+  seed: string;
+  character: CharacterId;
+  extracted: boolean;
+  salvage: number;
+  kills: number;
+  durationMs: number;
+  boss?: BossId;
+  /** Ended by abandoning from the pause menu. */
+  abandoned?: boolean;
 }
 
 export interface Settings {
@@ -76,9 +115,26 @@ export interface Settings {
   screenShake: boolean;
   /** Full-screen colour flashes when hurt. */
   flashes: boolean;
+  /** Small always-on map in the corner. */
+  minimap: boolean;
+  /** Assist mode: more oxygen, half damage; daily runs aren't posted to the board. */
+  assist: boolean;
+  /** First-time tips during runs. */
+  tips: boolean;
 }
 
-export const DEFAULT_SETTINGS: Settings = { master: 0.8, music: 0.6, sfx: 0.8, screenShake: true, flashes: true };
+export const ASSIST = { capacity: 1.5, damage: 0.5 } as const;
+
+export const DEFAULT_SETTINGS: Settings = {
+  master: 0.8,
+  music: 0.6,
+  sfx: 0.8,
+  screenShake: true,
+  flashes: true,
+  minimap: false,
+  assist: false,
+  tips: true,
+};
 
 export type ShopItem =
   | { kind: 'character'; id: CharacterId }
@@ -101,10 +157,14 @@ export function defaultSave(): SaveData {
     codex: [],
     rewards: [],
     achievements: [],
+    bosses: emptyBossRecords(),
+    tips: [],
     playerId: '',
     callsign: '',
     callsignClaimed: '',
     daily: { day: '', best: 0 },
+    weekly: { week: '', best: 0 },
+    streak: { lastDay: '', count: 0, best: 0 },
     settings: { ...DEFAULT_SETTINGS },
     cosmetics: [],
     upgrades: { health: 0, capacity: 0, speed: 0 },
@@ -119,7 +179,21 @@ export function defaultSave(): SaveData {
         robot: { body: 'steel', accent: 'cyan' },
       },
     },
-    stats: { runs: 0, extractions: 0, bestHaul: 0, totalBanked: 0, dronesDestroyed: 0 },
+    stats: {
+      runs: 0,
+      extractions: 0,
+      bestHaul: 0,
+      totalBanked: 0,
+      dronesDestroyed: 0,
+      dodges: 0,
+      drumsDetonated: 0,
+      elitesKilled: 0,
+      timeAboardMs: 0,
+      deepestDive: 0,
+      bestCombo: 0,
+      bountiesClaimed: 0,
+    },
+    history: [],
   };
 }
 
@@ -139,11 +213,11 @@ export function owns(save: SaveData, item: ShopItem): boolean {
       return save.tools.includes(item.id);
     case 'stat':
       return save.upgrades[item.id] >= STATS[item.id].costs.length;
-    case 'cosmetic':
-      return (
-        findCosmetic(item.character, item.slot, item.id).cost === 0 ||
-        save.cosmetics.includes(cosmeticKey(item.character, item.slot, item.id))
-      );
+    case 'cosmetic': {
+      const option = findCosmetic(item.character, item.slot, item.id);
+      if (option.trophy) return save.achievements.includes(option.trophy.achievement);
+      return option.cost === 0 || save.cosmetics.includes(cosmeticKey(item.character, item.slot, item.id));
+    }
   }
 }
 
@@ -163,7 +237,8 @@ export function priceOf(save: SaveData, item: ShopItem): number | null {
       return STATS[item.id].costs[save.upgrades[item.id]] ?? null;
     case 'cosmetic': {
       const option = COSMETICS[item.character][item.slot].find((c) => c.id === item.id);
-      return option ? option.cost : null;
+      // Trophies aren't for sale.
+      return option && !option.trophy ? option.cost : null;
     }
   }
 }
@@ -273,6 +348,9 @@ export function sanitizeSettings(raw: unknown): Settings {
     sfx: vol(r.sfx, DEFAULT_SETTINGS.sfx),
     screenShake: flag(r.screenShake, DEFAULT_SETTINGS.screenShake),
     flashes: flag(r.flashes, DEFAULT_SETTINGS.flashes),
+    minimap: flag(r.minimap, DEFAULT_SETTINGS.minimap),
+    assist: flag(r.assist, DEFAULT_SETTINGS.assist),
+    tips: flag(r.tips, DEFAULT_SETTINGS.tips),
   };
 }
 
@@ -299,6 +377,14 @@ export interface RunResult {
   dronesDestroyed: number;
   /** Crew logs picked up. Kept even if the run fails. */
   logsFound?: string[];
+  dodges?: number;
+  drumsDetonated?: number;
+  elitesKilled?: number;
+  durationMs?: number;
+  /** Deck reached (deep dives count when you extract). */
+  depth?: number;
+  bestCombo?: number;
+  bounties?: number;
 }
 
 export function applyRunResult(save: SaveData, result: RunResult): SaveData {
@@ -317,12 +403,110 @@ export function applyRunResult(save: SaveData, result: RunResult): SaveData {
   }
   next.stats.runs += 1;
   next.stats.dronesDestroyed += Math.max(0, result.dronesDestroyed);
+  next.stats.dodges += Math.max(0, result.dodges ?? 0);
+  next.stats.drumsDetonated += Math.max(0, result.drumsDetonated ?? 0);
+  next.stats.elitesKilled += Math.max(0, result.elitesKilled ?? 0);
+  next.stats.timeAboardMs += Math.max(0, Math.round(result.durationMs ?? 0));
+  next.stats.bestCombo = Math.max(next.stats.bestCombo, result.bestCombo ?? 0);
+  next.stats.bountiesClaimed += Math.max(0, result.bounties ?? 0);
+  if (result.extracted) next.stats.deepestDive = Math.max(next.stats.deepestDive, result.depth ?? 1);
   if (result.extracted) {
     next.stats.extractions += 1;
     next.stats.totalBanked += banked;
     next.stats.bestHaul = Math.max(next.stats.bestHaul, banked);
   }
   return next;
+}
+
+/** Boss contracts open after a few extractions; the Bloom Mother also needs research vessels unlocked. */
+export function bossUnlocked(save: SaveData, id: BossId): boolean {
+  if (save.stats.extractions < BOSS_UNLOCK_EXTRACTIONS) return false;
+  return BOSSES[id].ship === 'freighter' || isResearchUnlocked(save.codex);
+}
+
+/** Records a boss kill: pays the first-kill bonus once and keeps the best time. */
+export function recordBossKill(save: SaveData, id: BossId, durationMs: number): { save: SaveData; firstKill: boolean } {
+  const next = clone(save);
+  const rec = next.bosses[id];
+  const firstKill = rec.kills === 0;
+  rec.kills += 1;
+  const ms = Math.max(1, Math.round(durationMs));
+  rec.bestMs = rec.bestMs ? Math.min(rec.bestMs, ms) : ms;
+  if (firstKill) next.credits += BOSSES[id].firstKillReward;
+  return { save: next, firstKill };
+}
+
+export const STREAK = { bonusPerDay: 10, maxBonus: 70 } as const;
+
+const dayBefore = (day: string) => {
+  const d = new Date(`${day}T12:00:00Z`);
+  d.setUTCDate(d.getUTCDate() - 1);
+  return d.toISOString().slice(0, 10);
+};
+
+/**
+ * Counts a Daily Derelict extraction towards your streak. Only the first one
+ * each day counts; it pays a bonus that grows with the streak.
+ */
+export function recordStreak(save: SaveData, day: string): { save: SaveData; bonus: number; counted: boolean } {
+  if (save.streak.lastDay === day) return { save, bonus: 0, counted: false };
+  const next = clone(save);
+  const count = save.streak.lastDay === dayBefore(day) ? save.streak.count + 1 : 1;
+  const bonus = Math.min(STREAK.maxBonus, count * STREAK.bonusPerDay);
+  next.streak = { lastDay: day, count, best: Math.max(save.streak.best, count) };
+  next.credits += bonus;
+  return { save: next, bonus, counted: true };
+}
+
+/** The streak as it stands today: it's broken if you missed yesterday. */
+export function liveStreak(save: SaveData, today: string): number {
+  const { lastDay, count } = save.streak;
+  return lastDay === today || lastDay === dayBefore(today) ? count : 0;
+}
+
+/** Keeps the best extracted score for a weekly challenge; a new week starts fresh. */
+export function recordWeekly(save: SaveData, week: string, score: number): SaveData {
+  const next = clone(save);
+  next.weekly = next.weekly.week === week ? { week, best: Math.max(next.weekly.best, score) } : { week, best: score };
+  return next;
+}
+
+export function markTipSeen(save: SaveData, id: TipId): SaveData {
+  if (save.tips.includes(id)) return save;
+  return { ...clone(save), tips: [...save.tips, id] };
+}
+
+export function resetTips(save: SaveData): SaveData {
+  return { ...clone(save), tips: [] };
+}
+
+/** Adds a finished run to the front of the history, keeping the last few. */
+export function recordRun(save: SaveData, record: RunRecord): SaveData {
+  const next = clone(save);
+  next.history = [record, ...next.history].slice(0, HISTORY_LIMIT);
+  return next;
+}
+
+function sanitizeRecord(v: unknown): RunRecord | null {
+  if (!isObj(v)) return null;
+  const ship = SHIP_TYPES.includes(v.ship as ShipType) ? (v.ship as ShipType) : null;
+  const mode = ['daily', 'weekly', 'custom', 'random', 'boss'].includes(v.mode as string) ? (v.mode as RunRecord['mode']) : null;
+  const character = (Object.keys(CHARACTERS) as CharacterId[]).includes(v.character as CharacterId) ? (v.character as CharacterId) : null;
+  if (!ship || !mode || !character || typeof v.at !== 'string' || Number.isNaN(Date.parse(v.at))) return null;
+  const rec: RunRecord = {
+    at: v.at,
+    ship,
+    mode,
+    seed: typeof v.seed === 'string' ? v.seed.slice(0, 32) : '',
+    character,
+    extracted: v.extracted === true,
+    salvage: num(v.salvage),
+    kills: num(v.kills),
+    durationMs: num(v.durationMs),
+  };
+  if (BOSS_IDS.includes(v.boss as BossId)) rec.boss = v.boss as BossId;
+  if (v.abandoned === true) rec.abandoned = true;
+  return rec;
 }
 
 /** Records newly earned achievements and pays their salvage rewards. */
@@ -402,6 +586,7 @@ export function sanitizeSave(raw: unknown): SaveData {
   const codex = pickIds(raw.codex, CODEX.map((e) => e.id), []);
   const rewards = pickIds(raw.rewards, CHAPTERS.map((c) => `chapter-${c.id}`), []);
   const achievements = pickIds(raw.achievements, ACHIEVEMENT_IDS, []);
+  const tips = pickIds(raw.tips, TIP_IDS, []);
 
   const up = isObj(raw.upgrades) ? raw.upgrades : {};
   const upgrades = {} as Record<StatId, number>;
@@ -419,6 +604,14 @@ export function sanitizeSave(raw: unknown): SaveData {
       typeof dailyRaw.day === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(dailyRaw.day)
         ? { day: dailyRaw.day, best: num(dailyRaw.best) }
         : { day: '', best: 0 },
+    streak:
+      isObj(raw.streak) && typeof raw.streak.lastDay === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(raw.streak.lastDay)
+        ? { lastDay: raw.streak.lastDay, count: num(raw.streak.count), best: num(raw.streak.best) }
+        : { lastDay: '', count: 0, best: 0 },
+    weekly:
+      isObj(raw.weekly) && typeof raw.weekly.week === 'string' && /^\d{4}-W\d{2}$/.test(raw.weekly.week)
+        ? { week: raw.weekly.week, best: num(raw.weekly.best) }
+        : { week: '', best: 0 },
     settings: sanitizeSettings(raw.settings),
     credits: num(raw.credits),
     characters,
@@ -428,6 +621,7 @@ export function sanitizeSave(raw: unknown): SaveData {
     codex,
     rewards,
     achievements,
+    tips,
     cosmetics,
     upgrades,
   };
@@ -456,6 +650,12 @@ export function sanitizeSave(raw: unknown): SaveData {
     }
   }
 
+  const bossRaw = isObj(raw.bosses) ? raw.bosses : {};
+  for (const id of BOSS_IDS) {
+    const r = isObj(bossRaw[id]) ? (bossRaw[id] as Record<string, unknown>) : {};
+    save.bosses[id] = { kills: num(r.kills), bestMs: num(r.bestMs) };
+  }
+
   const st = isObj(raw.stats) ? raw.stats : {};
   save.stats = {
     runs: num(st.runs),
@@ -463,7 +663,17 @@ export function sanitizeSave(raw: unknown): SaveData {
     bestHaul: num(st.bestHaul),
     totalBanked: num(st.totalBanked),
     dronesDestroyed: num(st.dronesDestroyed),
+    dodges: num(st.dodges),
+    drumsDetonated: num(st.drumsDetonated),
+    elitesKilled: num(st.elitesKilled),
+    timeAboardMs: num(st.timeAboardMs),
+    deepestDive: num(st.deepestDive),
+    bestCombo: num(st.bestCombo),
+    bountiesClaimed: num(st.bountiesClaimed),
   };
+  save.history = Array.isArray(raw.history)
+    ? raw.history.map(sanitizeRecord).filter((r): r is RunRecord => r !== null).slice(0, HISTORY_LIMIT)
+    : [];
   return save;
 }
 

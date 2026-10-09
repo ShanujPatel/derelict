@@ -18,6 +18,11 @@ const run = (patch: Partial<RunSummary> = {}): RunSummary => ({
   rivalsBoarded: 0,
   hacks: 0,
   elitesKilled: 0,
+  bossKilled: null,
+  weekly: false,
+  bounties: 0,
+  bestCombo: 0,
+  depth: 1,
   ...patch,
 });
 const ids = (r: RunSummary, have: string[] = []) => newAchievements(r, have).map((a) => a.id);
@@ -46,6 +51,12 @@ describe('achievements', () => {
     ['weed-killer', { ship: 'research', eggsDestroyed: 3 }],
     ['systems-admin', { hacks: 3 }],
     ['big-game', { elitesKilled: 3 }],
+    ['fired', { bossKilled: 'foreman' }],
+    ['root-and-branch', { bossKilled: 'mother' }],
+    ['mutant', { weekly: true }],
+    ['bounty-hunter', { bounties: 1 }],
+    ['hoover', { bestCombo: 6 }],
+    ['deep-diver', { depth: 3 }],
     ['daily-driver', { daily: true }],
   ] as [string, Partial<RunSummary>][])('%s', (id, patch) => {
     expect(ids(run(patch), ['first-extract'])).toContain(id);

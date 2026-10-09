@@ -133,6 +133,34 @@ Unlocks widen options rather than making runs trivially easy.
 - **Elites:** 2× HP, 1.12× speed, guaranteed extra salvage; 8% base chance, 30% on hardened ships.
 - **Achievements:** 13 one-off goals paying 25–100 salvage, checked at the end of each run (some don't need you to extract).
 
+## 9c. Boss contracts (v0.7)
+
+Opt-in runs from the DAILY tab (unlocked after 3 extractions; the Bloom Mother also needs research vessels). Each boss has its own arena (`core/arena.ts`): **staging bay** (supplies, 2–3 guards) → **arena** (34×21, mirrored cover pillars from 3 seeded layouts, weak points, drums) → **vault** behind a 2-tile bulkhead that opens on the kill (exit, two caches, salvage). No conditions, elites, rivals or data logs in contracts.
+
+| | The Foreman (freighter) | The Bloom Mother (research) |
+|---|---|---|
+| HP | 70 | 80 |
+| Defence | Armour: 0 damage unless stunned or stripped; railgun 50% | Carapace: 0 damage unless mouth open (2.2 s every 5.2 s / 3.9 s) |
+| Weak points | 4 power couplings (5 HP): each stuns 2.2 s; all gone = no armour | 3 feeder roots (6 HP, torch one-shots): heal her 0.4 HP/s each, regrow after 20 s |
+| Stuns / burst | Charge into wall/pillar: 3 s stun; drum: 1.8 s stun + 8 | Drum near her: 10 through the carapace |
+| Attacks | Telegraphed charge (28), rivet fan (5→9 shots), contact (18) | Acid fan when opening (5→7), crawler births (max 4), contact (20) |
+| Phase 2 (≤50%) | Faster, shorter wind-up, drones from hatches (max 3) | Opens more often, spore rings (14 slow shots) |
+| First kill | +200 | +220 |
+
+## 9d. Deep salvage (v0.8)
+
+- **Deep dive:** lift pad on random/custom runs (own seeded stream, ≥50% of the walking distance from the start, never in the exit room). Descending restarts the scene on `SEED-Dn` carrying HP, O₂, salvage, kills and logs; depth n adds +7% elite chance, +25% salvage, +5% hostile speed per level below the first; maximum depth 5.
+- **Weekly Challenge:** `weekly-YYYY-Www` seed (ISO week, UTC), ship type and two of six mutators from the seed. Mutators fold into the ship condition where they overlap (drain, salvage, elites, darkness); damage, hostile speed and heal-on-kill are applied directly.
+- **Daily streak:** first daily extraction per day; +10 per consecutive day, capped at +70.
+- **New hostiles:** mimic crates (freighters, 2, wake within 34 px), stalkers (research, 2, cloaked beyond 52 px or for 2.5 s after a hit).
+- **Shock floors:** 2 per freighter, 1 per research vessel; 3.2 s cycle, 1.2 s live after a 0.6 s warning; 12 damage to you, 1 per 0.45 s to walking hostiles.
+- **Bounty:** one drone/crawler/spitter per ordinary run, 3× HP, 40–70 salvage, tracked on the scanner.
+- **Combos:** 4 s window, +0.1× per link, cap ×1.5.
+- **Arc caster:** 130 px reach in a 0.6 rad cone, then 80 px hops, up to 4 targets, 2 then 1 damage. **Sentry:** 12 s, fires every 0.42 s within 150 px, costs 6 O₂.
+- **Gamepad:** standard mapping via the Gamepad API, radial deadzone 0.2.
+- **Power-ups:** Overdrive (×2 fire rate, 8 s), Aegis (absorbs 2 hits); guaranteed from elites/bounties, 4% otherwise. **Turrets** lock on for 0.55 s with a visible laser before firing. **Self-repair** perk (robot): 3 HP/s for 2.4 battery/s after 4 s without damage.
+- **Accessibility:** assist mode (+50% O₂, ×0.5 damage, no leaderboard post), corner minimap, first-time tips (10), field manual, motion toggles.
+
 ## 10. Art and audio
 
 - **Pixel art**, 16×16 tiles, limited palette per ship type (cold blues for freighters, sickly greens for research vessels).
@@ -181,7 +209,9 @@ Each version is a tagged GitHub release with notes.
 | **v0.5.1** ✅ | Player names: random unique sci-fi names, editable in the Crew tab, shown on the leaderboard |
 | **v0.5.3** ✅ | Health packs / repair kits on every ship |
 | **v0.6** ✅ | Field kit: dodge roll, scanner map, explosive drums, supply drops, ship conditions, elites, achievements |
-| **Later** | Bosses; codex chapters 2–3; more ship types; gamepad polish; accessibility options |
+| **v0.7** ✅ | Boss contracts: the Foreman and the Bloom Mother in handcrafted three-part arenas |
+| **v0.8** ✅ | Deep salvage: gamepad, deep dive, weekly challenge, streaks, arc caster, sentry, 3 perks, mimics, stalkers, shock floors, bounties, combos, codex chapter 2, run history, tips, field manual, assist mode, trophy cosmetics, share card |
+| **Later** | Codex chapter 3; more ship types; more bosses; online weekly board |
 
 ## 13. Open questions
 

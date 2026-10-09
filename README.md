@@ -10,16 +10,18 @@ A real-time, top-down sci-fi roguelike that runs in the browser. Board abandoned
 
 ## How to play
 
-| Action | Control |
-|---|---|
-| Move | WASD / arrow keys |
-| Aim and fire | Mouse / left click (hold) |
-| Swap gun | Q, 1 / 2, or mouse wheel |
-| Tool (torch, hacking or grav) | F or right click |
-| Dodge roll | Shift or Space |
-| Scanner map | Tab |
-| Pause | Esc or P |
-| Mute | M |
+| Action | Keyboard + mouse | Gamepad |
+|---|---|---|
+| Move | WASD / arrow keys | Left stick |
+| Aim and fire | Mouse / left click (hold) | Right stick, RT |
+| Swap gun | Q, 1 / 2, or mouse wheel | Y |
+| Tool (torch, hacking, grav or sentry) | F or right click | X or RB |
+| Dodge roll | Shift or Space | A or LB |
+| Scanner map | Tab | Back or B |
+| Pause | Esc or P | Start |
+| Mute | M | |
+
+Xbox and PlayStation controllers work in the browser: plug one in and press a button. In the hub, Start launches and Y boards the daily ship.
 
 **On a phone or tablet:** left thumb moves, right thumb aims and fires. The **GUN**, tool and **ROLL** buttons sit on the right; **II** at the top pauses and **MAP** opens the scanner. Works in portrait and landscape.
 
@@ -40,11 +42,28 @@ Find salvage crates and O₂ canisters, grab the glowing health packs (repair ki
 
 **Ship conditions:** every derelict has a condition picked from its seed: a power failure (darker, no lamps), a hull breach (faster oxygen drain), a rich manifest (salvage worth more), hardened security (more gold **elite** hostiles with double health and extra loot), a jammed scanner, or nothing unusual. The daily card shows today's.
 
-**Achievements:** 13 goals, from *Ghost* (extract without destroying anything) to *Demolitions* (three kills with drum blasts in one run). Each pays salvage once; see them under **Log**.
+**Boss contracts** (DAILY tab, after 3 extractions): two bosses, each in its own three-part arena: a staging bay with supplies, the arena itself with cover pillars and the boss's weak points, and a sealed vault with the exit and the best loot, which only opens when the boss dies.
 
-**Tools:** the cutting torch opens cracked walls for shortcuts. The hacking tool turns turrets to your side and opens locked caches. The grav tool fires a cone-shaped push that shoves and stuns enemies and swats incoming shots aside.
+- **The Foreman** (freighter cargo bay): an armoured loader that ignores normal fire. Bait its telegraphed charge and roll aside so it stuns itself on a wall, shoot its four power couplings (each overloads it; lose them all and the armour is gone), or catch it in a drum blast. The railgun gets through armour at half damage. At half health it goes into overdrive and calls in drones.
+- **The Bloom Mother** (research hatchery): her carapace turns shots aside, so hit her core while her mouth is open to spit acid. Three feeder roots heal her: shoot or torch them before they regrow. Drums beside her hit straight through. At half health she fires slow spore rings you roll through.
 
-**Crew logs:** every ship hides one data log. Collect them to piece together what happened to the Halcyon Drift and the Lacuna. You keep logs even if you die.
+Your first kill of each pays a bonus, and the contract card keeps your best time. Share a fight with `?boss=foreman&seed=ABC123`.
+
+**Deep dive:** ordinary runs have a purple lift pad as well as the exit. Take it to drop to a deeper deck (down to depth 5) carrying your health, oxygen and salvage: each level is richer but has more elites and quicker hostiles. Or take the exit and bank it.
+
+**More aboard:** mimic crates on freighters that look like salvage until you get close, cloaked stalkers on research vessels, electrified shock floors that cycle on and off, and one named **bounty** target per run worth a big payout (it's tracked on your scanner). Chain pickups quickly for a **salvage combo** of up to ×1.5. Elites and bounties always drop a **power-up**: *Overdrive* (double fire rate for 8 seconds) or *Aegis* (a shield that soaks two hits). Wall turrets show a red laser sight while they lock on.
+
+**Weekly Challenge** (DAILY tab): one ship a week, the same for everyone, with two mutators such as *Glass cannon* (double damage both ways) or *Thin air* (faster oxygen drain, richer salvage). Link: `?weekly`. Daily extractions also build a **streak** worth up to +70 salvage a day.
+
+**Achievements:** 19 goals, from *Ghost* (extract without destroying anything) to *Demolitions* (three kills with drum blasts in one run). Each pays salvage once; see them under **Log**.
+
+**Tools:** the cutting torch opens cracked walls for shortcuts (and burns through boss roots). The hacking tool turns turrets to your side and opens locked caches. The grav tool fires a cone-shaped push that shoves and stuns enemies and swats incoming shots aside. The sentry drone deploys a little auto-turret for 12 seconds.
+
+**Guns:** blaster, scattergun, the piercing railgun, and the **arc caster**, whose lightning jumps between up to four nearby hostiles (and sets off fuel drums).
+
+**Crew logs:** every ship hides one data log. Collect them to piece together what happened to the Halcyon Drift and the Lacuna; chapter 2, *The Gravecutter Ledger*, follows, with two logs only the bosses carry. You keep logs even if you die.
+
+**Help and accessibility:** first-time tips explain things as you meet them (worded for your controls), and **Log → Field manual** has every control and a guide to what's aboard. Under **Log → Settings**: assist mode (50% more oxygen, half damage; daily runs aren't posted), an always-on corner minimap, and switches for screen shake, flashes and tips. The pause menu shows your run so far, and the results screen can copy a **share card** with a link to replay the same ship.
 
 ![Research vessel](docs/screenshot-research.png)
 
@@ -52,9 +71,11 @@ Find salvage crates and O₂ canisters, grab the glowing health packs (repair ki
 
 - **Crew:** unlock the armoured Robot, which runs on battery instead of oxygen.
 - **Systems:** hull plating, life support and servo boot upgrades.
-- **Armoury:** the Railgun, which pierces a whole line of enemies, and the Hacking tool.
-- **Perks:** Scavenger, Cold cutter, Scrapper or Second wind, one per run.
-- **Cosmetics:** suit, visor, chassis and optics colours.
+- **Armoury:** the Railgun, the Arc caster, and the hacking, grav and sentry tools.
+- **Perks:** Scavenger, Cold cutter, Scrapper, Second wind, Adrenaline, Demolitionist, Field medic or Self-repair (robot), one per run.
+- **Cosmetics:** suit, visor, chassis and optics colours, plus trophy colours you can only earn (beat a boss, finish a weekly...).
+
+**Log** also keeps your personal bests, your last 10 runs and a lifetime service record.
 
 Progress saves in your browser. Use **Log → Copy save code** to move it to another device.
 
@@ -92,11 +113,13 @@ src/
   core/      Pure game logic: RNG, seeds, deck generator (per ship type), tile display
              rules, pathfinding, oxygen, weapons, codex, rivals, leaderboard rules,
              field kit (dodge, drops, blasts, scanner), ship conditions, achievements,
+             boss arenas and boss rules,
              progression (shop, saves, export codes), virtual-stick maths, screen sizing.
              No Phaser imports, so it's fully unit-tested.
              Sound effect and music definitions (sfx, music) live here too.
   audio/     Web Audio engine: synth voices, mixer, generative music player.
-  scenes/    Phaser scenes: Boot (builds textures), Hub, Game and Pause, plus enemy AI.
+  scenes/    Phaser scenes: Boot (builds textures), Hub, Game and Pause, plus enemy AI
+             and the two boss fights.
   hub/       Between-runs screens as an HTML/CSS overlay.
   net/       Leaderboard client (Supabase REST).
   ui/        Touch controls (twin virtual sticks).
@@ -119,7 +142,9 @@ See the full [game design document](docs/GDD.md).
 - [x] **v0.5** Synthesised sound and music, pause menu, settings, hit-pause, death and extraction moments
 - [x] **v0.5.1–0.5.3** Unique player names, themed daily button, health packs
 - [x] **v0.6** Field kit: dodge roll, scanner map, explosive drums, supply drops, ship conditions, elite hostiles, achievements
-- [ ] **Later** Bosses, more codex chapters, more ship types
+- [x] **v0.7** Boss contracts: the Foreman and the Bloom Mother, each with a handcrafted arena
+- [x] **v0.8** Deep salvage: gamepad, deep dive lifts, weekly challenge, arc caster, sentry, mimics, stalkers, shock floors, bounties, combos, codex chapter 2, tips, field manual, assist mode
+- [ ] **Later** More codex chapters, more ship types, more bosses
 
 ## Licence
 

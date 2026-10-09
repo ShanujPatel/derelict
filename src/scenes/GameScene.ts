@@ -1,7 +1,7 @@
 import Phaser from 'phaser';
 import { TILE_SIZE } from '../art/sprites';
 import { ensureCharacterTexture } from '../art/textures';
-import { isResearchUnlocked, nextLogFor, type LogEntry } from '../core/codex';
+import { bossLog, isResearchUnlocked, nextLogFor, type LogEntry } from '../core/codex';
 import { generateDeck, type Deck } from '../core/deckGenerator';
 import {
   SOLID_DISPLAY_TILES,
@@ -17,23 +17,42 @@ import {
   tickOxygen,
   type OxygenState,
 } from '../core/oxygen';
-import { dayFromDailySeed } from '../core/leaderboard';
+import { dayFromDailySeed, formatDuration } from '../core/leaderboard';
 import { findPath, hasLineOfSight, nearestByWalking } from '../core/pathing';
 import { GRAV_CONE, GRAV_RANGE, hitsShield, inGravCone, rivalEvent, type RivalEvent } from '../core/rivals';
 import { newAchievements, type Achievement } from '../core/achievements';
 import { CONDITIONS, ELITE, conditionFor, isElite, type Condition } from '../core/conditions';
-import { applyRunResult, awardAchievements, computeRunStats, recordDaily, setClaimedName, type RunStats, type SaveData } from '../core/progression';
+import { SECTIONS, generateArena, type ArenaDeck } from '../core/arena';
+import { BOUNTY, BOUNTY_KINDS, bountyFor } from '../core/bounty';
+import { TIP_IDS, nextTip, tipText, type TipId } from '../core/tips';
+import { shareText } from '../core/share';
+import { vesselName } from '../core/names';
+import { DEPTH, baseSeed, deeperSeed, depthMods, placeLift, type Carry } from '../core/depth';
+import { bfsDistances } from '../core/pathing';
+import { NO_COMBO, comboAfterPickup, comboMultiplier, comboTimeLeft, type ComboState } from '../core/combo';
+import { NO_EFFECTS, combineMutators, weekFromSeed, weeklySetup, type Mutator, type MutatorEffects } from '../core/weekly';
+import { BOSSES, type BossId } from '../core/bosses';
+import { BossFight, ForemanFight, MotherFight, type BossHost } from './boss';
+import { ASSIST, applyRunResult, awardAchievements, recordStreak, markTipSeen, recordWeekly, computeRunStats, recordBossKill, recordRun, recordDaily, setClaimedName, type RunStats, type SaveData } from '../core/progression';
 import { hashString, type ResolvedSeed } from '../core/seed';
 import { ENEMY_KINDS, Tile, type EnemyKind, type Point } from '../core/types';
-import { WEAPONS, pelletAngles, type WeaponDef } from '../core/weapons';
+import { WEAPONS, chainTargets, pelletAngles, type WeaponDef } from '../core/weapons';
 import { leaderboard } from '../net/leaderboard';
 import { loadSave, storeSave } from '../storage';
 import { TouchControls } from '../ui/TouchControls';
+import { pad } from '../ui/Gamepad';
+import { AIM_MIN, PAD, STICK_FIRE, TRIGGER_FIRE } from '../core/gamepad';
 import { audio } from '../audio/engine';
 import { combatIntensity } from '../core/music';
 import {
   BARREL,
   DODGE,
+  POWERUPS,
+  rollPowerup,
+  SENTRY,
+  SHOCK,
+  onHazard,
+  shockState,
   DROP_RULES,
   blastDamage,
   createExplored,
@@ -46,7 +65,7 @@ import {
   rollSupplyDrop,
 } from '../core/fieldkit';
 import { spatialise, type SfxName } from '../core/sfx';
-import { ENEMY_STATS, RIVAL_KINDS, isHacked, kindOf, updateEnemy, type EnemyWorld } from './enemies';
+import { ENEMY_STATS, RIVAL_KINDS, TURRET_LOCK_MS, isHacked, kindOf, updateEnemy, wakeMimic, type EnemyWorld } from './enemies';
 
 type Sprite = Phaser.Physics.Arcade.Sprite;
 type Keys = Record<
@@ -58,8 +77,8 @@ type Keys = Record<
 const PLAYER_SPEED = 110;
 const TORCH_COST = 4;
 const GRAV_COST = 3;
-const TOOL_COOLDOWN = { torch: 300, hacker: 300, grav: 900 } as const;
-const TOOL_LABEL = { torch: 'TORCH', hacker: 'HACK', grav: 'GRAV' } as const;
+const TOOL_COOLDOWN = { torch: 300, hacker: 300, grav: 900, sentry: SENTRY.cooldownMs } as const;
+const TOOL_LABEL = { torch: 'TORCH', hacker: 'HACK', grav: 'GRAV', sentry: 'SENTRY' } as const;
 const SUFFOCATION_DPS = 6;
 const HACK_RANGE = 32;
 const HACK_BREAK_RANGE = 46;
@@ -77,7 +96,7 @@ interface Hack {
   progress: number;
 }
 
-export class GameScene extends Phaser.Scene implements EnemyWorld {
+export class GameScene extends Phaser.Scene implements EnemyWorld, BossHost {
   private run!: ResolvedSeed;
   private deck!: Deck;
   private seedHash = 0;
@@ -114,6 +133,36 @@ export class GameScene extends Phaser.Scene implements EnemyWorld {
   // Run state — reset in init() because Phaser reuses the scene instance on restart.
   private saveAtStart!: SaveData;
   private condition: Condition = CONDITIONS.calm;
+  private mutators: Mutator[] = [];
+  private bountyTarget: Sprite | null = null;
+  private bountiesClaimed = 0;
+  private tipBox: Phaser.GameObjects.Text | null = null;
+  private laserGfx!: Phaser.GameObjects.Graphics;
+  private lastHurtAt = 0;
+  private overdriveUntil = 0;
+  private aegis = 0;
+  private powerText!: Phaser.GameObjects.Text;
+  private depth = 1;
+  private liftPad: Phaser.Physics.Arcade.Image | null = null;
+  private descending = false;
+  private hazardGfx!: Phaser.GameObjects.Graphics;
+  private nextShockTick = 0;
+  private nextZap = 0;
+  private sentry: { base: Phaser.GameObjects.Image; gun: Phaser.GameObjects.Image; ring: Phaser.GameObjects.Graphics; until: number; nextShot: number } | null = null;
+  private combo: ComboState = NO_COMBO;
+  private bestCombo = 0;
+  private comboText!: Phaser.GameObjects.Text;
+  private tipUntil = 0;
+  private nextTipCheck = 0;
+  private tipsSeen: string[] = [];
+  private bountyGfx!: Phaser.GameObjects.Graphics;
+  private bountyLabel: Phaser.GameObjects.Text | null = null;
+  private mods: MutatorEffects = NO_EFFECTS;
+  private arena: ArenaDeck | null = null;
+  private boss: BossFight | null = null;
+  private bossParts!: Phaser.Physics.Arcade.StaticGroup;
+  private bulkhead: Phaser.GameObjects.Image | null = null;
+  private bossDefeated: { id: BossId; ms: number } | null = null;
   private elitesKilled = 0;
   private conditionText!: Phaser.GameObjects.Text;
   private stats!: RunStats;
@@ -147,6 +196,8 @@ export class GameScene extends Phaser.Scene implements EnemyWorld {
   private nextGhostAt = 0;
   private dodges = 0;
   private blastKills = 0;
+  private drumsDetonated = 0;
+  private abandoned = false;
   private damageTaken = 0;
   private eggsDestroyed = 0;
   private rivalsKilled = 0;
@@ -157,6 +208,8 @@ export class GameScene extends Phaser.Scene implements EnemyWorld {
   private mapOpen = false;
   private mapDirty = true;
   private mapTiles!: Phaser.GameObjects.Graphics;
+  private miniMap!: Phaser.GameObjects.Graphics;
+  private nextMiniAt = 0;
   private mapMarks!: Phaser.GameObjects.Graphics;
   private mapText!: Phaser.GameObjects.Text;
   private ended = false;
@@ -170,14 +223,70 @@ export class GameScene extends Phaser.Scene implements EnemyWorld {
     this.seedHash = hashString(data.seed);
     this.saveAtStart = loadSave();
     this.stats = computeRunStats(this.saveAtStart);
-    this.pendingLog = nextLogFor(this.saveAtStart.codex, this.run.ship);
-    this.logsFound = [];
-    this.hp = this.stats.maxHp;
-    this.condition = conditionFor(this.run.seed, this.run.ship);
+    const carry = data.carry;
+    this.depth = carry?.depth ?? 1;
+    this.logsFound = carry ? [...carry.logsFound] : [];
+    this.pendingLog = nextLogFor([...this.saveAtStart.codex, ...this.logsFound], this.run.ship);
+    this.hp = carry ? Math.min(this.stats.maxHp, carry.hp) : this.stats.maxHp;
+    this.liftPad = null;
+    this.descending = false;
+    // Boss contracts are fought as designed: no random condition, no elites, no rivals, no data logs.
+    this.condition = this.run.boss ? { ...CONDITIONS.calm, eliteChance: 0 } : conditionFor(this.run.seed, this.run.ship);
+    // Weekly challenge mutators fold into the ship's condition where they overlap.
+    this.mutators = this.run.mode === 'weekly' ? weeklySetup(this.run.seed).mutators : [];
+    this.mods = combineMutators(this.mutators);
+    if (this.mutators.length) {
+      const c = this.condition;
+      this.condition = {
+        ...c,
+        oxygenDrain: c.oxygenDrain * this.mods.drain,
+        salvage: c.salvage * this.mods.salvage,
+        eliteChance: Math.max(c.eliteChance, this.mods.eliteChance),
+        darkness: c.darkness + this.mods.darkness,
+        lampsOff: c.lampsOff || this.mods.darkness > 0,
+      };
+    }
+    // Deeper decks: more elites, richer salvage, quicker hostiles.
+    if (this.depth > 1) {
+      const dm = depthMods(this.depth);
+      this.condition = {
+        ...this.condition,
+        eliteChance: Math.min(0.6, this.condition.eliteChance + dm.eliteBonus),
+        salvage: this.condition.salvage * dm.salvage,
+      };
+      this.mods = { ...this.mods, enemySpeed: this.mods.enemySpeed * dm.enemySpeed };
+    }
+    this.arena = null;
+    this.boss = null;
+    this.bountyTarget = null;
+    this.bountyLabel = null;
+    this.bountiesClaimed = 0;
+    this.tipBox = null;
+    this.lastHurtAt = 0;
+    this.overdriveUntil = 0;
+    this.aegis = 0;
+    this.nextShockTick = 0;
+    this.nextZap = 0;
+    this.sentry = null;
+    this.combo = NO_COMBO;
+    this.bestCombo = 0;
+    this.tipUntil = 0;
+    this.nextTipCheck = 0;
+    this.tipsSeen = [...this.saveAtStart.tips];
+    this.bulkhead = null;
+    this.bossDefeated = null;
+    this.bossLabel = undefined;
+    this.resultActions = null;
+    this.lastRank = undefined;
     this.elitesKilled = 0;
-    this.oxygen = createOxygen(this.stats.capacity, this.stats.drainPerSecond * this.condition.oxygenDrain);
-    this.salvage = 0;
-    this.kills = 0;
+    const assist = this.saveAtStart.settings.assist;
+    this.oxygen = createOxygen(
+      Math.round(this.stats.capacity * (assist ? ASSIST.capacity : 1)),
+      this.stats.drainPerSecond * this.condition.oxygenDrain,
+    );
+    if (carry) this.oxygen = { ...this.oxygen, current: Math.min(this.oxygen.max, carry.oxygen) };
+    this.salvage = carry?.salvage ?? 0;
+    this.kills = carry?.kills ?? 0;
     this.secondWindUsed = false;
     this.weapons = [...this.stats.guns];
     this.weaponIndex = 0;
@@ -186,7 +295,8 @@ export class GameScene extends Phaser.Scene implements EnemyWorld {
     this.invulnerableUntil = 0;
     this.hack = null;
     this.rivals = rivalEvent(this.run.seed, this.run.ship);
-    this.rivalsArrived = false;
+    this.rivalsArrived = !!this.run.boss;
+    if (this.run.boss) this.pendingLog = null;
     this.nextStepAt = 0;
     this.nextHeartbeatAt = 0;
     this.nextHackTickAt = 0;
@@ -197,12 +307,15 @@ export class GameScene extends Phaser.Scene implements EnemyWorld {
     this.nextGhostAt = 0;
     this.dodges = 0;
     this.blastKills = 0;
+    this.drumsDetonated = 0;
+    this.abandoned = false;
     this.damageTaken = 0;
     this.eggsDestroyed = 0;
     this.rivalsKilled = 0;
     this.rivalsBoarded = 0;
     this.hacks = 0;
     this.nextRevealAt = 0;
+    this.nextMiniAt = 0;
     this.mapOpen = false;
     this.mapDirty = true;
     this.ended = false;
@@ -213,7 +326,8 @@ export class GameScene extends Phaser.Scene implements EnemyWorld {
 
   create() {
     this.physics.resume();
-    this.deck = generateDeck(this.run.seed, this.run.ship);
+    this.arena = this.run.boss ? generateArena(this.run.seed, this.run.boss) : null;
+    this.deck = this.arena ?? generateDeck(this.run.seed, this.run.ship);
     this.grid = this.deck.tiles.map((row) => [...row]);
     this.explored = createExplored(this.deck.width, this.deck.height);
 
@@ -224,7 +338,8 @@ export class GameScene extends Phaser.Scene implements EnemyWorld {
     this.buildHud();
     this.showIntro();
 
-    this.runStartedAt = this.time.now;
+    // A deep dive's clock covers every deck so far.
+    this.runStartedAt = this.time.now - (this.run.carry?.elapsedMs ?? 0);
     audio.setSettings(this.saveAtStart.settings);
     audio.startMusic(this.run.ship);
     audio.setIntensity(0);
@@ -296,6 +411,10 @@ export class GameScene extends Phaser.Scene implements EnemyWorld {
     this.hostileShots = this.physics.add.group();
 
     let enemyIndex = 0;
+    // One named hostile per ordinary run carries a bounty.
+    const eligible = this.arena ? [] : this.deck.spawns.filter((s) => BOUNTY_KINDS.includes(s.kind as EnemyKind));
+    const bounty = bountyFor(this.run.seed, this.run.ship, eligible.length);
+    const bountySpawn = bounty ? eligible[bounty.index] : null;
     for (const s of this.deck.spawns) {
       const { x, y } = toWorld(s);
       switch (s.kind) {
@@ -304,6 +423,8 @@ export class GameScene extends Phaser.Scene implements EnemyWorld {
           break;
         case 'oxygen':
         case 'medkit':
+        case 'overdrive':
+        case 'aegis':
           this.addPickup(x, y, s.kind, s.value);
           break;
         case 'cache': {
@@ -325,9 +446,15 @@ export class GameScene extends Phaser.Scene implements EnemyWorld {
           if (ENEMY_KINDS.includes(s.kind)) {
             const e = this.spawnEnemy(s.kind, x, y);
             if (isElite(this.run.seed, this.run.ship, enemyIndex++, this.condition.eliteChance)) this.makeElite(e);
+            if (bounty && s === bountySpawn) this.makeBounty(e, bounty.name, bounty.reward);
           }
       }
     }
+
+    if (this.arena) this.setupArena(this.arena);
+    else this.setupLift();
+    this.hazardGfx = this.add.graphics().setDepth(3);
+    this.laserGfx = this.add.graphics().setDepth(12);
 
     const start = toWorld(this.deck.start);
     this.playerShadow = this.add.image(start.x, start.y + 7, 'shadow').setDepth(4);
@@ -365,6 +492,10 @@ export class GameScene extends Phaser.Scene implements EnemyWorld {
     this.events.once('shutdown', () => kb.removeCapture('TAB,SPACE'));
     this.input.mouse?.disableContextMenu();
     this.input.on('wheel', () => this.switchWeapon());
+    // Moving the mouse hands aiming back from the gamepad.
+    this.input.on('pointermove', (p: Phaser.Input.Pointer) => {
+      if (!p.wasTouch) pad.active = false;
+    });
     this.touch = new TouchControls(this, TOOL_LABEL[this.stats.tool.id]);
   }
 
@@ -402,7 +533,7 @@ export class GameScene extends Phaser.Scene implements EnemyWorld {
     this.physics.add.overlap(this.player, this.enemies, (_p, e) => {
       const enemy = e as Sprite;
       const damage = ENEMY_STATS[kindOf(enemy)].contactDamage;
-      if (damage > 0 && !isHacked(enemy)) this.hurtPlayer(damage, enemy);
+      if (damage > 0 && !isHacked(enemy) && !enemy.getData('dormant')) this.hurtPlayer(damage, enemy);
     });
     this.physics.add.overlap(this.player, this.hostileShots, (_p, s) => {
       const shot = s as Sprite;
@@ -412,7 +543,9 @@ export class GameScene extends Phaser.Scene implements EnemyWorld {
       shot.destroy();
     });
     this.physics.add.overlap(this.player, this.pickups, (_p, item) => this.collect(item as Sprite));
+    if (this.boss) this.setupBossCollisions(this.boss);
     this.physics.add.overlap(this.player, this.exitPad, () => this.endRun(true));
+    if (this.liftPad) this.physics.add.overlap(this.player, this.liftPad, () => this.descend());
   }
 
   private buildHud() {
@@ -421,14 +554,19 @@ export class GameScene extends Phaser.Scene implements EnemyWorld {
     this.hpLabel = fixed(this.add.text(0, 0, 'HP', FONT));
     this.o2Label = fixed(this.add.text(0, 0, this.isRobot ? 'PWR' : 'O₂', FONT));
     this.salvageText = fixed(this.add.text(0, 0, '', FONT).setOrigin(1, 0));
+    this.comboText = fixed(this.add.text(0, 0, '', { ...FONT, color: '#ffd166' }).setOrigin(1, 0));
+    this.powerText = fixed(this.add.text(0, 0, '', { ...FONT, fontSize: '9px', color: '#ff9a3c' }));
     this.weaponText = fixed(this.add.text(0, 0, '', FONT));
-    const label = this.run.mode === 'daily' ? this.run.seed.toUpperCase() : `SEED ${this.run.seed}`;
+    const label = this.run.mode === 'daily' || this.run.mode === 'weekly' ? this.run.seed.toUpperCase() : `SEED ${this.run.seed}`;
     this.seedText = fixed(this.add.text(0, 0, label, { ...FONT, color: '#6f7fa3' }).setOrigin(1, 0));
     this.conditionText = fixed(
-      this.add.text(0, 0, this.condition.id === 'calm' ? '' : this.condition.name.toUpperCase(), { ...FONT, color: '#ff9a3c' }).setOrigin(1, 0),
+      this.add
+        .text(0, 0, this.hudConditionLabel(), { ...FONT, color: '#ff9a3c', align: 'right' })
+        .setOrigin(1, 0),
     );
     this.mapTiles = this.add.graphics().setScrollFactor(0).setDepth(120).setVisible(false);
     this.mapMarks = this.add.graphics().setScrollFactor(0).setDepth(121).setVisible(false);
+    this.miniMap = this.add.graphics().setScrollFactor(0).setDepth(99);
     this.mapText = fixed(this.add.text(0, 0, '', { ...FONT, fontSize: '9px', color: '#6fd6ff', backgroundColor: '#05070c' }).setOrigin(0.5, 1))
       .setDepth(122)
       .setVisible(false);
@@ -443,8 +581,10 @@ export class GameScene extends Phaser.Scene implements EnemyWorld {
     this.o2Label.setPosition(8, 18);
     this.salvageText.setPosition(w - 8, 6);
     this.seedText.setPosition(w - 8, 18);
-    this.conditionText.setPosition(w - 8, 30);
+    // On narrow portrait screens the weapon line is in the way, so drop below it.
+    this.conditionText.setPosition(w - 8, w < 360 ? 46 : 30);
     this.weaponText.setPosition(8, 32);
+    this.powerText.setPosition(8, 45);
     this.touch.layout(w, h);
     this.mapDirty = true;
   }
@@ -455,29 +595,52 @@ export class GameScene extends Phaser.Scene implements EnemyWorld {
       torch: 'torch cracked walls',
       hacker: 'hack turrets + locked caches (stay close)',
       grav: 'grav pulse: shove + stun, block shots',
+      sentry: 'deploy a sentry turret',
     }[this.stats.tool.id];
-    const help = this.touch.enabled
+    const help = pad.connected
+      ? `Left stick move · right stick aim · RT fire · A roll\nX/RB: ${toolHint} · Y swap · Back: map · reach the green EXIT`
+      : this.touch.enabled
       ? `Left thumb: move · right thumb: aim + fire\nGUN: swap · ROLL: dodge · ${TOOL_LABEL[this.stats.tool.id]}: ${toolHint}\nMAP: scanner · reach the green EXIT`
       : `WASD move · mouse aim + fire · Q swap gun · Shift/Space roll\nF / right-click: ${toolHint} · Tab: scanner map · reach the green EXIT`;
-    const title = this.run.ship === 'research' ? 'BOARDING RESEARCH VESSEL' : 'BOARDING DERELICT';
+    const title = this.run.boss
+      ? `CONTRACT · ${BOSSES[this.run.boss].arena.toUpperCase()}`
+      : this.depth > 1
+        ? `DEPTH ${this.depth} · RICHER, NASTIER`
+        : this.run.ship === 'research'
+          ? 'BOARDING RESEARCH VESSEL'
+          : 'BOARDING DERELICT';
     const titleText = this.add
       .text(w / 2, h * 0.22, title, { ...FONT, fontSize: '16px', color: this.run.ship === 'research' ? '#9bff5c' : '#ffd166' })
       .setOrigin(0.5)
       .setScrollFactor(0)
       .setDepth(200);
     const hint = this.add
-      .text(w / 2, h * 0.68, help, { ...FONT, fontSize: '9px', color: '#9fb0d0', align: 'center' })
+      .text(w / 2, h * 0.68, help, { ...FONT, fontSize: '9px', color: '#9fb0d0', align: 'center', wordWrap: { width: w - 20 } })
       .setOrigin(0.5)
       .setScrollFactor(0)
       .setDepth(200);
     this.tweens.add({ targets: titleText, alpha: 0, delay: 1800, duration: 600 });
-    if (this.condition.id !== 'calm') {
+    if (this.mutators.length) {
+      const mut = this.add
+        .text(w / 2, h * 0.22 + 20, `WEEKLY CHALLENGE\n${this.mutators.map((m) => `${m.name.toUpperCase()}: ${m.blurb}`).join('\n')}`, {
+          ...FONT,
+          fontSize: '9px',
+          color: '#c9a0ff',
+          align: 'center',
+          wordWrap: { width: w - 20 },
+        })
+        .setOrigin(0.5, 0)
+        .setScrollFactor(0)
+        .setDepth(200);
+      this.tweens.add({ targets: mut, alpha: 0, delay: 4200, duration: 700 });
+    } else if (this.condition.id !== 'calm') {
       const cond = this.add
         .text(w / 2, h * 0.22 + 20, `${this.condition.name.toUpperCase()}\n${this.condition.blurb}`, {
           ...FONT,
           fontSize: '9px',
           color: '#ff9a3c',
           align: 'center',
+          wordWrap: { width: w - 20 },
         })
         .setOrigin(0.5, 0)
         .setScrollFactor(0)
@@ -501,13 +664,13 @@ export class GameScene extends Phaser.Scene implements EnemyWorld {
     this.sfx(name, x, y);
   }
 
-  shootAtPlayer(x: number, y: number, angle: number, speed: number, damage: number, texture: string) {
+  shootAtPlayer(x: number, y: number, angle: number, speed: number, damage: number, texture: string, lifetimeMs = 2200) {
     this.sfx(texture === 'acid' ? 'acid' : 'enemyShot', x, y);
     const shot = this.hostileShots.create(x, y, texture) as Sprite;
     shot.setDepth(12).setCircle(2).setRotation(angle).setData('damage', damage);
     if (texture === 'bullet') shot.setTint(0xff5a6a);
     shot.setVelocity(Math.cos(angle) * speed, Math.sin(angle) * speed);
-    this.time.delayedCall(2200, () => shot.destroy());
+    this.time.delayedCall(lifetimeMs, () => shot.destroy());
   }
 
   shootAtEnemies(x: number, y: number, angle: number) {
@@ -524,12 +687,102 @@ export class GameScene extends Phaser.Scene implements EnemyWorld {
     if (stats.shadowY) e.setData('shadow', this.add.image(x, y + stats.shadowY, 'shadow').setDepth(4));
     if (kind === 'drone') e.anims.play({ key: 'drone-idle', startFrame: Math.round(x + y) % 2 });
     if (kind === 'crawler') e.anims.play('crawler-run');
+    if (kind === 'stalker') {
+      e.anims.play('stalker-run');
+      e.setAlpha(0.08);
+    }
     if (kind === 'egg') e.anims.play({ key: 'egg-pulse', startFrame: Math.round(x) % 2 });
+    if (kind === 'mimic') e.setData('dormant', true).setFrame(0);
     if (kind === 'turret') {
       e.setData('barrel', this.add.image(x, y, 'barrel').setOrigin(0.2, 0.5).setDepth(11));
     }
     if (RIVAL_KINDS.includes(kind)) e.setData('loot', []);
     return e;
+  }
+
+  // ---------------------------------------------------------------- first-time tips
+
+  private updateTips(time: number) {
+    // Wait for the boarding help text to fade before showing tips.
+    if (!this.saveAtStart.settings.tips || time < this.nextTipCheck || time - this.runStartedAt < 7000) return;
+    this.nextTipCheck = time + 400;
+    if (time < this.tipUntil || this.tipsSeen.length >= TIP_IDS.length) return;
+    const near = (x: number, y: number, r: number) => Phaser.Math.Distance.Between(this.player.x, this.player.y, x, y) < r;
+    const pickupNear = (kind: string, r: number) =>
+      (this.pickups.getChildren() as Sprite[]).some((p) => p.active && p.getData('kind') === kind && near(p.x, p.y, r));
+    const triggered: TipId[] = [];
+    if (this.oxygen.current < this.oxygen.max * 0.35) triggered.push('oxygen-low');
+    if (this.hostiles().some((e) => !e.getData('dormant') && time < (e.getData('alertUntil') ?? 0) && near(e.x, e.y, 200))) triggered.push('hostile');
+    if (this.barrels().some((d) => near(d.x, d.y, 80))) triggered.push('drum');
+    if (this.liftPad && near(this.liftPad.x, this.liftPad.y, 140)) triggered.push('lift');
+    if ((this.deck.hazards ?? []).some((h) => near((h.x + h.w / 2) * TILE_SIZE, (h.y + h.h / 2) * TILE_SIZE, 90))) triggered.push('shock');
+    if (pickupNear('datalog', 90)) triggered.push('datalog');
+    if (pickupNear('medkit', 70)) triggered.push('medkit');
+    if (pickupNear('salvage', 70)) triggered.push('salvage');
+    const t = this.tileAt(this.player.x, this.player.y);
+    let wall = false;
+    for (let dy = -3; dy <= 3 && !wall; dy++) for (let dx = -3; dx <= 3; dx++) if (this.grid[t.y + dy]?.[t.x + dx] === Tile.WeakWall) wall = true;
+    if (wall && this.stats.tool.id === 'torch') triggered.push('weak-wall');
+    if (near(this.exitPad.x, this.exitPad.y, 160) && this.time.now - this.runStartedAt > 3000) triggered.push('exit');
+    if (time - this.runStartedAt > 40000) triggered.push('scanner');
+    const tip = nextTip(triggered, this.tipsSeen);
+    if (tip) this.showTip(tip);
+  }
+
+  private showTip(id: TipId) {
+    this.tipsSeen.push(id);
+    storeSave(markTipSeen(loadSave(), id));
+    const scheme = pad.connected && pad.active ? 'pad' : this.touch.enabled ? 'touch' : 'keyboard';
+    const { width: w, height: h } = this.scale;
+    this.tipBox?.destroy();
+    this.tipBox = this.add
+      .text(w / 2, this.touch.enabled ? h - 96 : h - 34, `TIP · ${tipText(id, scheme)}`, {
+        ...FONT,
+        fontSize: '9px',
+        color: '#e8f4ff',
+        backgroundColor: '#0d1a2acc',
+        padding: { x: 8, y: 5 },
+        align: 'center',
+        wordWrap: { width: Math.min(360, w - 32) },
+      })
+      .setOrigin(0.5, 1)
+      .setScrollFactor(0)
+      .setDepth(140)
+      .setAlpha(0);
+    this.tweens.add({ targets: this.tipBox, alpha: 1, duration: 200 });
+    this.tweens.add({ targets: this.tipBox, alpha: 0, delay: 5200, duration: 500 });
+    this.tipUntil = this.time.now + 6200;
+    audio.play('ui', { volume: 0.6 });
+  }
+
+  /** Bounty target: named, tougher, marked, and worth a reward. */
+  private makeBounty(e: Sprite, name: string, reward: number) {
+    e.setData({ bounty: { name, reward }, hp: Math.ceil((e.getData('hp') as number) * BOUNTY.hpMultiplier) });
+    e.setScale(BOUNTY.scale).setTint(0xff7b9a);
+    this.bountyTarget = e;
+    this.bountyGfx = this.add.graphics().setDepth(17);
+    this.bountyLabel = this.add
+      .text(e.x, e.y - 16, name, { ...FONT, fontSize: '8px', color: '#ff7b9a' })
+      .setOrigin(0.5, 1)
+      .setDepth(17);
+    this.time.delayedCall(2600, () => {
+      if (!this.ended && e.active) this.showBanner(`BOUNTY: ${name}`, `Destroy it for +${reward} salvage. It's marked on your scanner.`, 0xff7b9a);
+    });
+  }
+
+  private updateBounty(time: number) {
+    const t = this.bountyTarget;
+    if (!t) return;
+    const g = this.bountyGfx.clear();
+    if (!t.active) {
+      this.bountyLabel?.destroy();
+      this.bountyTarget = null;
+      return;
+    }
+    const bob = Math.sin(time / 200) * 1.5;
+    const y = t.y - 14 + bob;
+    g.fillStyle(0xff7b9a, 1).fillTriangle(t.x - 3, y - 4, t.x + 3, y - 4, t.x, y);
+    this.bountyLabel?.setPosition(t.x, y - 5);
   }
 
   /** Elite: double health, a little faster, gold, and always drops extra salvage. */
@@ -539,12 +792,12 @@ export class GameScene extends Phaser.Scene implements EnemyWorld {
   }
 
   moveTowards(e: Sprite, target: Point, speed: number) {
-    speed *= (e.getData('speedMul') as number | undefined) ?? 1;
+    speed *= ((e.getData('speedMul') as number | undefined) ?? 1) * this.mods.enemySpeed;
     this.physics.moveTo(e, target.x, target.y, speed);
   }
 
   followPath(e: Sprite, target: Point, speed: number) {
-    speed *= (e.getData('speedMul') as number | undefined) ?? 1;
+    speed *= ((e.getData('speedMul') as number | undefined) ?? 1) * this.mods.enemySpeed;
     const goal = this.tileAt(target.x, target.y);
     const goalKey = `${goal.x},${goal.y}`;
     let path = e.getData('path') as Point[] | undefined;
@@ -591,12 +844,17 @@ export class GameScene extends Phaser.Scene implements EnemyWorld {
 
   update(time: number, delta: number) {
     this.touch.draw();
-    if (this.ended) return;
+    pad.poll();
+    if (this.ended) return this.padResults();
     const seconds = delta / 1000;
 
     this.updatePlayer(time);
     if (!this.rivalsArrived && time - this.runStartedAt > this.rivals.arrivesAfter * 1000) this.spawnRivals();
     for (const e of this.enemies.getChildren() as Sprite[]) if (e.active) updateEnemy(e, this, time);
+    if (this.boss && !this.boss.dead) {
+      if (!this.boss.awake && this.inArena()) this.boss.wake(time);
+      this.boss.update(time, delta);
+    }
     this.updateHack(seconds);
 
     this.oxygen = tickOxygen(this.oxygen, seconds);
@@ -607,6 +865,12 @@ export class GameScene extends Phaser.Scene implements EnemyWorld {
     }
 
     this.updateAudio(time);
+    this.updateBounty(time);
+    this.updateSentry(time);
+    this.updateHazards(time);
+    this.drawTurretLasers(time);
+    this.updateSelfRepair(time, seconds);
+    this.updateTips(time);
     this.updateScanner(time);
     this.drawLighting();
     this.drawHud();
@@ -619,7 +883,7 @@ export class GameScene extends Phaser.Scene implements EnemyWorld {
       this.nextRevealAt = time + 150;
       if (reveal(this.explored, this.grid, this.deck.rooms, this.tileAt(this.player.x, this.player.y)) > 0) this.mapDirty = true;
     }
-    if (Phaser.Input.Keyboard.JustDown(this.keys.TAB) || this.touch.consume('map')) {
+    if (Phaser.Input.Keyboard.JustDown(this.keys.TAB) || this.touch.consume('map') || pad.justPressed(PAD.BACK) || pad.justPressed(PAD.B)) {
       this.mapOpen = !this.mapOpen;
       this.mapDirty = true;
       audio.play('scan');
@@ -628,6 +892,38 @@ export class GameScene extends Phaser.Scene implements EnemyWorld {
     this.mapMarks.setVisible(this.mapOpen);
     this.mapText.setVisible(this.mapOpen);
     if (this.mapOpen) this.drawScanner();
+    const mini = this.saveAtStart.settings.minimap && !this.mapOpen;
+    this.miniMap.setVisible(mini);
+    if (mini && time > this.nextMiniAt) {
+      this.nextMiniAt = time + 200;
+      this.drawMiniMap();
+    }
+  }
+
+  /** Always-on corner map: explored floor, you, and the exit once you've seen it. */
+  private drawMiniMap() {
+    const { width: w } = this.scale;
+    const cell = Math.max(1, Math.floor(76 / this.deck.width));
+    const mw = cell * this.deck.width;
+    const mh = cell * this.deck.height;
+    const x0 = w - 8 - mw;
+    const y0 = Math.max(44, this.conditionText.y + this.conditionText.height + 6);
+    const g = this.miniMap.clear();
+    g.fillStyle(0x05070c, 0.75).fillRect(x0 - 2, y0 - 2, mw + 4, mh + 4);
+    g.lineStyle(1, 0x2a3550, 1).strokeRect(x0 - 2.5, y0 - 2.5, mw + 5, mh + 5);
+    const room = this.condition.scannerJammed ? this.currentRoom() : null;
+    g.fillStyle(this.run.ship === 'research' ? 0x2c6f66 : 0x3d5a8a, 1);
+    for (let y = 0; y < this.deck.height; y++) {
+      for (let x = 0; x < this.deck.width; x++) {
+        if (this.grid[y][x] !== Tile.Floor || !isExplored(this.explored, this.deck.width, { x, y })) continue;
+        if (room && !(x >= room.x && x < room.x + room.w && y >= room.y && y < room.y + room.h)) continue;
+        g.fillRect(x0 + x * cell, y0 + y * cell, cell, cell);
+      }
+    }
+    const exit = this.tileAt(this.exitPad.x, this.exitPad.y);
+    if (isExplored(this.explored, this.deck.width, exit)) g.fillStyle(0x3dff9a, 1).fillRect(x0 + exit.x * cell - 1, y0 + exit.y * cell - 1, cell + 2, cell + 2);
+    const p = this.tileAt(this.player.x, this.player.y);
+    g.fillStyle(0xffffff, 1).fillRect(x0 + p.x * cell - 1, y0 + p.y * cell - 1, cell + 2, cell + 2);
   }
 
   /** Where the map sits on screen and how big each tile is. */
@@ -681,14 +977,32 @@ export class GameScene extends Phaser.Scene implements EnemyWorld {
       const s = Math.max(2, f.cell * size);
       g.fillStyle(colour, 1).fillRect(f.x + t.x * f.cell + (f.cell - s) / 2, f.y + t.y * f.cell + (f.cell - s) / 2, s, s);
     };
-    const colours: Record<string, number> = { salvage: 0xe8b04a, oxygen: 0x3fa7ff, medkit: 0xff3b4e, datalog: 0x5ef2ff };
+    const colours: Record<string, number> = {
+      salvage: 0xe8b04a,
+      oxygen: 0x3fa7ff,
+      medkit: 0xff3b4e,
+      datalog: 0x5ef2ff,
+      overdrive: 0xff7b3a,
+      aegis: 0x5ef2ff,
+    };
     for (const p of this.pickups.getChildren() as Sprite[]) {
       if (p.active) dot(p.x, p.y, colours[p.getData('kind') as string] ?? 0xffffff);
     }
     for (const c of this.caches.getChildren() as Sprite[]) if (!c.getData('open')) dot(c.x, c.y, 0xb08a3a, 1.2);
     for (const b of this.barrels()) dot(b.x, b.y, 0xff7b3a);
+    for (const h of this.deck.hazards ?? []) {
+      if (!isExplored(this.explored, this.deck.width, { x: h.x, y: h.y })) continue;
+      g.lineStyle(1, 0xffd166, 0.8).strokeRect(f.x + h.x * f.cell + 0.5, f.y + h.y * f.cell + 0.5, h.w * f.cell - 1, h.h * f.cell - 1);
+    }
     const blink = Math.floor(this.time.now / 300) % 2 === 0;
     dot(this.exitPad.x, this.exitPad.y, 0x3dff9a, blink ? 1.8 : 1.3);
+    if (this.liftPad) dot(this.liftPad.x, this.liftPad.y, 0xc9a0ff, blink ? 1.6 : 1.2);
+    // The bounty's tracking beacon shows even in unexplored space.
+    if (this.bountyTarget?.active) {
+      const b = this.tileAt(this.bountyTarget.x, this.bountyTarget.y);
+      const s = Math.max(3, f.cell * (blink ? 1.8 : 1.2));
+      g.fillStyle(0xff7b9a, 1).fillRect(f.x + b.x * f.cell + (f.cell - s) / 2, f.y + b.y * f.cell + (f.cell - s) / 2, s, s);
+    }
     const p = this.tileAt(this.player.x, this.player.y);
     g.fillStyle(0xffffff, 1).fillCircle(f.x + (p.x + 0.5) * f.cell, f.y + (p.y + 0.5) * f.cell, Math.max(2, f.cell * 0.8));
     g.lineStyle(1, 0xffffff, 0.8).lineBetween(
@@ -705,7 +1019,7 @@ export class GameScene extends Phaser.Scene implements EnemyWorld {
       if (!e.active || isHacked(e) || time > (e.getData('alertUntil') ?? 0)) continue;
       if (Phaser.Math.Distance.Between(e.x, e.y, this.player.x, this.player.y) < 260) hunting++;
     }
-    audio.setIntensity(combatIntensity(hunting));
+    audio.setIntensity(this.boss?.awake && !this.boss.dead ? 1 : combatIntensity(hunting));
     if (this.oxygen.current < 25 && time > this.nextHeartbeatAt) {
       this.nextHeartbeatAt = time + (this.oxygen.current < 10 ? 650 : 950);
       audio.play('heartbeat', { volume: 0.8 });
@@ -723,6 +1037,10 @@ export class GameScene extends Phaser.Scene implements EnemyWorld {
     if (t.move.magnitude > 0) {
       ix = t.move.x;
       iy = t.move.y;
+    }
+    if (pad.move.magnitude > 0) {
+      ix = pad.move.x;
+      iy = pad.move.y;
     }
     const speed = PLAYER_SPEED * this.stats.speedMultiplier;
     const rolled = Phaser.Math.Distance.Between(this.dodgeFrom.x, this.dodgeFrom.y, this.player.x, this.player.y);
@@ -756,7 +1074,11 @@ export class GameScene extends Phaser.Scene implements EnemyWorld {
 
     // Aim: touch aim stick, else mouse, else face the direction of travel.
     let aim = this.player.rotation;
-    if (t.enabled) {
+    const usePad = pad.connected && pad.active;
+    if (usePad) {
+      if (pad.aim.magnitude > AIM_MIN) aim = pad.aim.angle;
+      else if (moving) aim = Math.atan2(iy, ix);
+    } else if (t.enabled) {
       if (t.aim.magnitude > 0) aim = t.aim.angle;
       else if (moving) aim = Math.atan2(iy, ix);
     } else {
@@ -767,38 +1089,46 @@ export class GameScene extends Phaser.Scene implements EnemyWorld {
     this.player.setRotation(aim);
 
     // Lean the camera a little towards where you're aiming.
-    const aiming = t.enabled ? t.aim.magnitude > 0 || moving : true;
+    const aiming = usePad ? pad.aim.magnitude > AIM_MIN || moving : t.enabled ? t.aim.magnitude > 0 || moving : true;
     this.lookX = Phaser.Math.Linear(this.lookX, aiming ? -Math.cos(aim) * 24 : 0, 0.08);
     this.lookY = Phaser.Math.Linear(this.lookY, aiming ? -Math.sin(aim) * 24 : 0, 0.08);
     this.cameras.main.setFollowOffset(this.lookX, this.lookY);
 
-    if (Phaser.Input.Keyboard.JustDown(k.ESC) || Phaser.Input.Keyboard.JustDown(k.P) || t.consume('pause')) {
+    if (Phaser.Input.Keyboard.JustDown(k.ESC) || Phaser.Input.Keyboard.JustDown(k.P) || t.consume('pause') || pad.justPressed(PAD.START)) {
       this.openPause();
       return;
     }
 
-    const rollPressed = Phaser.Input.Keyboard.JustDown(k.SHIFT) || Phaser.Input.Keyboard.JustDown(k.SPACE) || t.consume('dodge');
-    if (rollPressed && !dodging && dodgeReadiness(time, this.lastDodgeAt, this.isRobot) >= 1) this.startDodge(time, ix, iy, aim);
+    const rollPressed =
+      Phaser.Input.Keyboard.JustDown(k.SHIFT) || Phaser.Input.Keyboard.JustDown(k.SPACE) || t.consume('dodge') || pad.justPressed(PAD.A) || pad.justPressed(PAD.LB);
+    if (rollPressed && !dodging && dodgeReadiness(time, this.lastDodgeAt, this.isRobot, this.rollRate) >= 1) this.startDodge(time, ix, iy, aim);
 
-    if (Phaser.Input.Keyboard.JustDown(k.Q) || t.consume('swap')) this.switchWeapon();
+    if (Phaser.Input.Keyboard.JustDown(k.Q) || t.consume('swap') || pad.justPressed(PAD.Y)) this.switchWeapon();
     if (Phaser.Input.Keyboard.JustDown(k.ONE)) this.weaponIndex = 0;
     if (Phaser.Input.Keyboard.JustDown(k.TWO)) this.weaponIndex = 1;
 
     const pointer = this.input.activePointer;
-    const mouseFire = !t.enabled && pointer.leftButtonDown();
+    const mouseFire = !t.enabled && !usePad && pointer.leftButtonDown();
+    const padFire = usePad && (pad.trigger > TRIGGER_FIRE || pad.aim.magnitude > STICK_FIRE);
     const weapon = this.weapons[this.weaponIndex];
-    if ((mouseFire || t.firing) && time > this.lastShotAt + weapon.cooldownMs) {
+    const rate = time < this.overdriveUntil ? POWERUPS.overdriveRate : 1;
+    if ((mouseFire || padFire || t.firing) && time > this.lastShotAt + weapon.cooldownMs / rate) {
       this.lastShotAt = time;
       this.fire(weapon, aim);
     }
 
     const tool =
-      Phaser.Input.Keyboard.JustDown(k.F) || t.consume('torch') || (!t.enabled && pointer.rightButtonDown());
+      Phaser.Input.Keyboard.JustDown(k.F) ||
+      t.consume('torch') ||
+      pad.justPressed(PAD.X) ||
+      pad.justPressed(PAD.RB) ||
+      (!t.enabled && !usePad && pointer.rightButtonDown());
     const toolId = this.stats.tool.id;
     if (tool && time > this.lastToolAt + TOOL_COOLDOWN[toolId]) {
       this.lastToolAt = time;
       if (toolId === 'hacker') this.startHack();
       else if (toolId === 'grav') this.useGrav(aim);
+      else if (toolId === 'sentry') this.deploySentry(aim);
       else this.useTorch(aim);
     }
   }
@@ -833,6 +1163,7 @@ export class GameScene extends Phaser.Scene implements EnemyWorld {
 
   private fire(weapon: WeaponDef, aim: number) {
     audio.play(weapon.id, { volume: 0.9 });
+    if (weapon.chain) return this.fireArc(weapon, aim);
     for (const angle of pelletAngles(weapon, aim)) {
       const b = this.makeBullet(
         this.player.x + Math.cos(angle) * 9,
@@ -850,8 +1181,67 @@ export class GameScene extends Phaser.Scene implements EnemyWorld {
     this.shake(40, weapon.pellets > 1 ? 0.004 : 0.0015);
   }
 
+  /** Arc caster: instant lightning that jumps between hostiles (and sets off drums). */
+  private fireArc(weapon: WeaponDef, aim: number) {
+    type Target = { x: number; y: number; hit: (dmg: number) => void };
+    const targets: Target[] = [];
+    for (const e of this.hostiles()) targets.push({ x: e.x, y: e.y, hit: (d) => this.damageEnemy(e, d) });
+    for (const d of this.barrels()) targets.push({ x: d.x, y: d.y, hit: (n) => this.damageDrum(d, n) });
+    const boss = this.boss;
+    if (boss?.awake && !boss.dead) {
+      targets.push({ x: boss.sprite.x, y: boss.sprite.y, hit: (n) => boss.hit(n, false, boss.sprite.x, boss.sprite.y) });
+      for (const part of boss.livingParts()) targets.push({ x: part.x, y: part.y, hit: (n) => boss.damagePart(part, n) });
+    }
+    const origin = { x: this.player.x + Math.cos(aim) * 9, y: this.player.y + Math.sin(aim) * 9 };
+    const order = chainTargets(origin, aim, targets, weapon.chain ?? 1, (a, b) => this.canSee(a, b));
+
+    const g = this.add.graphics().setDepth(16);
+    const bolt = (a: Point, b: Point) => {
+      // A jagged line with a soft glow under it.
+      const steps = Math.max(3, Math.round(Phaser.Math.Distance.Between(a.x, a.y, b.x, b.y) / 12));
+      const pts = [a];
+      for (let i = 1; i < steps; i++) {
+        const t = i / steps;
+        pts.push({ x: a.x + (b.x - a.x) * t + Phaser.Math.Between(-4, 4), y: a.y + (b.y - a.y) * t + Phaser.Math.Between(-4, 4) });
+      }
+      pts.push(b);
+      for (const [width, colour, alpha] of [[4, 0x5ef2ff, 0.35], [1.5, 0xe0f8ff, 1]] as const) {
+        g.lineStyle(width, colour, alpha).beginPath().moveTo(pts[0].x, pts[0].y);
+        for (const pt of pts.slice(1)) g.lineTo(pt.x, pt.y);
+        g.strokePath();
+      }
+    };
+    if (!order.length) {
+      bolt(origin, { x: origin.x + Math.cos(aim) * 40, y: origin.y + Math.sin(aim) * 40 });
+    } else {
+      let from: Point = origin;
+      order.forEach((i, hop) => {
+        const t = targets[i];
+        bolt(from, t);
+        this.sparks.explode(5, t.x, t.y);
+        t.hit(hop === 0 ? weapon.damage : Math.max(1, weapon.damage - 1));
+        from = t;
+      });
+    }
+    this.tweens.add({ targets: g, alpha: 0, duration: 140, onComplete: () => g.destroy() });
+    this.shake(50, 0.002);
+  }
+
   /** Cuts a weak wall directly in front of the player. */
   private useTorch(aim: number) {
+    // The torch burns through a feeder root in one go.
+    for (const part of (this.bossParts?.getChildren() ?? []) as Sprite[]) {
+      if (part.getData('kind') !== 'root' || !part.getData('alive')) continue;
+      const tx = this.player.x + Math.cos(aim) * 16;
+      const ty = this.player.y + Math.sin(aim) * 16;
+      if (Phaser.Math.Distance.Between(tx, ty, part.x, part.y) > 18) continue;
+      this.oxygen = spendOxygen(this.oxygen, this.hasPerk('cold-cutter') ? 1 : TORCH_COST);
+      this.sparks.explode(24, part.x, part.y);
+      audio.play('torch');
+      this.floatText(part.x, part.y - 14, 'BURNED', '#ffd166');
+      this.boss?.breakPart(part);
+      return;
+    }
     for (const reach of [10, 18, 26]) {
       const t = this.tileAt(
         this.player.x + Math.cos(aim) * reach,
@@ -873,6 +1263,172 @@ export class GameScene extends Phaser.Scene implements EnemyWorld {
       audio.play('torch');
       return;
     }
+  }
+
+  // ---------------------------------------------------------------- deep dive
+
+  /** Ordinary runs get a lift to a deeper deck, until the bottom. */
+  private setupLift() {
+    if (!(this.run.mode === 'random' || this.run.mode === 'custom') || this.depth >= DEPTH.max) return;
+    const spot = placeLift(this.deck, bfsDistances(this.deck.tiles, this.deck.start));
+    if (!spot) return;
+    const { x, y } = toWorld(spot);
+    this.liftPad = this.physics.add.staticImage(x, y, 'lift').setDepth(2);
+    this.tweens.add({ targets: this.liftPad, angle: 360, repeat: -1, duration: 4000 });
+  }
+
+  /** Take the lift: carry everything down to the next deck. */
+  private descend() {
+    if (this.ended || this.descending) return;
+    this.descending = true;
+    const carry: Carry = {
+      depth: this.depth + 1,
+      hp: this.hp,
+      oxygen: this.oxygen.current,
+      salvage: this.salvage,
+      kills: this.kills,
+      logsFound: this.logsFound,
+      elapsedMs: this.time.now - this.runStartedAt,
+    };
+    audio.play('launch');
+    this.player.setVelocity(0, 0);
+    if (this.saveAtStart.settings.flashes) this.cameras.main.flash(250, 160, 110, 255);
+    this.tweens.add({ targets: this.player, scale: 0.2, alpha: 0, duration: 450 });
+    this.time.delayedCall(500, () =>
+      this.scene.restart({ seed: deeperSeed(this.run.seed, carry.depth), mode: this.run.mode, ship: this.run.ship, carry }),
+    );
+  }
+
+  /** Hostile turrets show a laser sight while they lock on, so their shots are fair. */
+  private drawTurretLasers(time: number) {
+    const g = this.laserGfx.clear();
+    for (const e of this.enemies.getChildren() as Sprite[]) {
+      if (!e.active || kindOf(e) !== 'turret' || isHacked(e) || !e.getData('tracking')) continue;
+      const left = (e.getData('nextShot') ?? 0) - time;
+      if (left <= 0 || left > TURRET_LOCK_MS) continue;
+      const barrel = e.getData('barrel') as Phaser.GameObjects.Image;
+      const len = Phaser.Math.Distance.Between(e.x, e.y, this.player.x, this.player.y) + 6;
+      const a = barrel.rotation;
+      g.lineStyle(1, 0xff3b4e, 0.35 + 0.5 * (1 - left / TURRET_LOCK_MS));
+      g.lineBetween(e.x + Math.cos(a) * 9, e.y + Math.sin(a) * 9, e.x + Math.cos(a) * len, e.y + Math.sin(a) * len);
+    }
+  }
+
+  /** Self-repair perk (robot): out of combat, battery becomes hull. */
+  private updateSelfRepair(time: number, seconds: number) {
+    if (!this.isRobot || !this.hasPerk('self-repair') || this.hp >= this.stats.maxHp) return;
+    if (time - this.lastHurtAt < 4000 || this.oxygen.current < 15) return;
+    const heal = Math.min(3 * seconds, this.stats.maxHp - this.hp);
+    this.hp += heal;
+    this.oxygen = spendOxygen(this.oxygen, heal * 0.8);
+    if (Math.random() < seconds * 3) this.sparks.explode(1, this.player.x + Phaser.Math.Between(-5, 5), this.player.y + Phaser.Math.Between(-5, 5));
+  }
+
+  /** Shock floors: draw them, and hurt whatever stands on a live one. */
+  private updateHazards(time: number) {
+    const hazards = this.deck.hazards ?? [];
+    const g = this.hazardGfx.clear();
+    if (!hazards.length) return;
+    const tick = time > this.nextShockTick;
+    if (tick) this.nextShockTick = time + SHOCK.enemyTickMs;
+    const you = this.tileAt(this.player.x, this.player.y);
+    for (const h of hazards) {
+      const state = shockState(time, h.phaseMs);
+      const x = h.x * TILE_SIZE;
+      const y = h.y * TILE_SIZE;
+      const w = h.w * TILE_SIZE;
+      const hh = h.h * TILE_SIZE;
+      // Grate outline and hazard corners, always visible.
+      g.fillStyle(0x3a3010, 0.3).fillRect(x + 1, y + 1, w - 2, hh - 2);
+      g.lineStyle(1, 0xffd166, 0.55).strokeRect(x + 1.5, y + 1.5, w - 3, hh - 3);
+      for (let gx = x + 4; gx < x + w - 2; gx += 4) g.lineStyle(1, 0x2a3550, 0.9).lineBetween(gx, y + 3, gx, y + hh - 3);
+      if (state === 'warn' && Math.floor(time / 90) % 2 === 0) g.fillStyle(0x6fd6ff, 0.18).fillRect(x + 2, y + 2, w - 4, hh - 4);
+      if (state !== 'on') continue;
+      g.fillStyle(0x5ef2ff, 0.28).fillRect(x + 2, y + 2, w - 4, hh - 4);
+      g.lineStyle(1, 0xe0f8ff, 0.9);
+      for (let i = 0; i < 3; i++) {
+        let px = x + Phaser.Math.Between(2, w - 2);
+        let py = y + 2;
+        g.beginPath().moveTo(px, py);
+        while (py < y + hh - 4) {
+          px = Phaser.Math.Clamp(px + Phaser.Math.Between(-5, 5), x + 2, x + w - 2);
+          py += Phaser.Math.Between(3, 6);
+          g.lineTo(px, py);
+        }
+        g.strokePath();
+      }
+      const near = Phaser.Math.Distance.Between(this.player.x, this.player.y, x + w / 2, y + hh / 2) < 200;
+      if (near && time > this.nextZap) {
+        this.nextZap = time + 400;
+        this.sfx('arc', x + w / 2, y + hh / 2);
+      }
+      if (onHazard(h, you.x, you.y)) this.hurtPlayer(SHOCK.playerDamage);
+      if (tick) {
+        for (const e of [...this.enemies.getChildren()] as Sprite[]) {
+          const k = kindOf(e);
+          // Drones hover, so they're safe; turrets and eggs are bolted down and shielded.
+          if (!e.active || k === 'drone' || ENEMY_STATS[k].solid) continue;
+          const t = this.tileAt(e.x, e.y);
+          if (onHazard(h, t.x, t.y)) this.damageEnemy(e, SHOCK.enemyDamage);
+        }
+      }
+    }
+  }
+
+  /** Sentry tool: drops a friendly auto-turret just ahead of you. */
+  private deploySentry(aim: number) {
+    this.removeSentry();
+    let x = this.player.x + Math.cos(aim) * 14;
+    let y = this.player.y + Math.sin(aim) * 14;
+    const t = this.tileAt(x, y);
+    if (this.grid[t.y]?.[t.x] !== Tile.Floor) ({ x, y } = this.player);
+    this.oxygen = spendOxygen(this.oxygen, SENTRY.cost);
+    const base = this.add.image(x, y, 'turret', 1).setDepth(9).setScale(0.8).setTint(0x9ff6ff);
+    const gun = this.add.image(x, y, 'barrel').setOrigin(0.2, 0.5).setDepth(10).setTint(0x9ff6ff).setRotation(aim);
+    const ring = this.add.graphics().setDepth(8);
+    this.sentry = { base, gun, ring, until: this.time.now + SENTRY.lifetimeMs, nextShot: this.time.now + 300 };
+    base.setScale(0.2);
+    this.tweens.add({ targets: base, scale: 0.8, duration: 160, ease: 'Back.out' });
+    audio.play('hackDone');
+    this.floatText(x, y - 12, 'SENTRY UP', '#5ef2ff');
+  }
+
+  private updateSentry(time: number) {
+    const s = this.sentry;
+    if (!s) return;
+    if (time > s.until) return this.removeSentry(true);
+    // A ring that drains as its battery runs down.
+    const left = (s.until - time) / SENTRY.lifetimeMs;
+    s.ring.clear().lineStyle(1, 0x5ef2ff, 0.7).beginPath();
+    s.ring.arc(s.base.x, s.base.y, 9, -Math.PI / 2, -Math.PI / 2 + Math.PI * 2 * left);
+    s.ring.strokePath();
+    if (time < s.nextShot) return;
+    let best: Sprite | null = null;
+    let bestD: number = SENTRY.range;
+    for (const e of this.hostiles()) {
+      if (e.getData('dormant')) continue;
+      const d = Phaser.Math.Distance.Between(s.base.x, s.base.y, e.x, e.y);
+      if (d < bestD && this.canSee(s.base, e)) {
+        best = e;
+        bestD = d;
+      }
+    }
+    const boss = this.boss;
+    const bossTarget = boss?.awake && !boss.dead && Phaser.Math.Distance.Between(s.base.x, s.base.y, boss.sprite.x, boss.sprite.y) < SENTRY.range;
+    const target = best ?? (bossTarget ? boss!.sprite : null);
+    if (!target) return;
+    s.nextShot = time + SENTRY.fireEveryMs;
+    const a = Phaser.Math.Angle.Between(s.base.x, s.base.y, target.x, target.y);
+    s.gun.setRotation(a);
+    this.shootAtEnemies(s.base.x + Math.cos(a) * 7, s.base.y + Math.sin(a) * 7, a);
+  }
+
+  private removeSentry(expired = false) {
+    const s = this.sentry;
+    if (!s) return;
+    if (expired) this.sparks.explode(10, s.base.x, s.base.y);
+    for (const o of [s.base, s.gun, s.ring]) o.destroy();
+    this.sentry = null;
   }
 
   /** Grav pulse: shoves and stuns enemies in a cone and swats incoming shots aside. */
@@ -1008,6 +1564,9 @@ export class GameScene extends Phaser.Scene implements EnemyWorld {
   }
 
   private damageEnemy(enemy: Sprite, amount: number) {
+    if (kindOf(enemy) === 'stalker') enemy.setData('revealedUntil', this.time.now + 2500);
+    amount *= this.mods.damageOut;
+    if (enemy.getData('dormant')) wakeMimic(enemy, this, this.time.now);
     const hp = (enemy.getData('hp') as number) - amount;
     if (hp > 0) this.sfx('hit', enemy.x, enemy.y);
     enemy.setData({ hp, alertUntil: this.time.now + 4000 });
@@ -1015,7 +1574,8 @@ export class GameScene extends Phaser.Scene implements EnemyWorld {
     this.time.delayedCall(60, () => {
       if (!enemy.active) return;
       enemy.clearTint();
-      if (enemy.getData('elite')) enemy.setTint(0xffc94a);
+      if (enemy.getData('bounty')) enemy.setTint(0xff7b9a);
+      else if (enemy.getData('elite')) enemy.setTint(0xffc94a);
     });
     if (hp <= 0) this.killEnemy(enemy);
   }
@@ -1036,6 +1596,17 @@ export class GameScene extends Phaser.Scene implements EnemyWorld {
     this.kills += 1;
     if (kind === 'egg') this.eggsDestroyed += 1;
     if (RIVAL_KINDS.includes(kind)) this.rivalsKilled += 1;
+    if (this.mods.healOnKill && this.hp < this.stats.maxHp) {
+      this.hp = Math.min(this.stats.maxHp, this.hp + this.mods.healOnKill);
+      this.floatText(this.player.x, this.player.y - 14, `+${this.mods.healOnKill}`, '#ff6b7d');
+    }
+    const bounty = enemy.getData('bounty') as { name: string; reward: number } | undefined;
+    if (bounty) {
+      this.bountiesClaimed += 1;
+      this.addPickup(enemy.x - 6, enemy.y + 6, 'salvage', bounty.reward);
+      this.showBanner('BOUNTY CLAIMED', `${bounty.name} is scrap. +${bounty.reward} salvage dropped`, 0x3dff9a);
+      audio.play('achievement');
+    }
     if (enemy.getData('elite')) {
       this.elitesKilled += 1;
       this.addPickup(enemy.x + 6, enemy.y - 5, 'salvage', Phaser.Math.Between(...ELITE.bonus));
@@ -1051,6 +1622,10 @@ export class GameScene extends Phaser.Scene implements EnemyWorld {
     if (this.hasPerk('scrapper')) this.addPickup(enemy.x, enemy.y, 'salvage', Phaser.Math.Between(Math.max(min, 5), Math.max(max, 10)));
     else if (Math.random() < chance) this.addPickup(enemy.x, enemy.y, 'salvage', Phaser.Math.Between(min, max));
 
+    // Elites and bounties always carry a power-up; anything else rarely does.
+    const power = rollPowerup(Math.random(), Math.random(), !!enemy.getData('elite') || !!enemy.getData('bounty'));
+    if (power && !parent) this.addPickup(enemy.x + 7, enemy.y - 5, power, 0);
+
     // Sometimes a supply drop too, more likely when you're low. Crawlers hatched from eggs
     // never drop supplies, or egg sacs would be an endless oxygen farm.
     if (!parent) {
@@ -1063,9 +1638,21 @@ export class GameScene extends Phaser.Scene implements EnemyWorld {
     enemy.destroy();
   }
 
-  private hurtPlayer(amount: number, source?: Sprite) {
+  hurtPlayer(amount: number, source?: Sprite) {
     if (this.time.now < this.invulnerableUntil || this.ended) return;
+    if (this.aegis > 0) {
+      // The shield soaks the hit.
+      this.aegis -= 1;
+      this.invulnerableUntil = this.time.now + 500;
+      this.sparks.explode(10, this.player.x, this.player.y);
+      audio.play('shieldBlock');
+      this.floatText(this.player.x, this.player.y - 14, this.aegis ? 'SHIELD HOLDS' : 'SHIELD DOWN', '#5ef2ff');
+      return;
+    }
     this.invulnerableUntil = this.time.now + 800;
+    this.lastHurtAt = this.time.now;
+    if (this.saveAtStart.settings.assist) amount *= ASSIST.damage;
+    amount *= this.mods.damageIn;
     this.hp -= amount * (1 - this.stats.armour);
     this.damageTaken += amount * (1 - this.stats.armour);
     audio.play('playerHurt');
@@ -1093,10 +1680,21 @@ export class GameScene extends Phaser.Scene implements EnemyWorld {
     if (!item.active) return;
     const kind = item.getData('kind') as string;
     const value = item.getData('value') as number;
-    if (kind === 'medkit') {
+    if (kind === 'overdrive' || kind === 'aegis') {
+      if (kind === 'overdrive') {
+        this.overdriveUntil = this.time.now + POWERUPS.overdriveMs;
+        this.floatText(item.x, item.y, 'OVERDRIVE', '#ff7b3a');
+      } else {
+        this.aegis = POWERUPS.aegisHits;
+        this.floatText(item.x, item.y, 'AEGIS SHIELD', '#5ef2ff');
+      }
+      audio.play('hackDone');
+      this.sparks.explode(12, item.x, item.y);
+    } else if (kind === 'medkit') {
       // Left where it is when you're already at full health, for later.
       if (this.hp >= this.stats.maxHp) return;
-      const healed = Math.min(value, this.stats.maxHp - this.hp);
+      const heal = this.hasPerk('field-medic') ? Math.round(value * 1.6) : value;
+      const healed = Math.min(heal, this.stats.maxHp - this.hp);
       this.hp += healed;
       audio.play('heal');
       this.floatText(item.x, item.y, `+${Math.round(healed)} ${this.isRobot ? 'REPAIR' : 'HP'}`, '#ff6b7d');
@@ -1111,10 +1709,13 @@ export class GameScene extends Phaser.Scene implements EnemyWorld {
       this.showBanner('DATA LOG RECOVERED', this.pendingLog.title);
       this.pendingLog = null;
     } else {
-      const amount = this.hasPerk('scavenger') ? Math.round(value * 1.25) : value;
+      this.combo = comboAfterPickup(this.combo, this.time.now);
+      this.bestCombo = Math.max(this.bestCombo, this.combo.count);
+      const mult = comboMultiplier(this.combo.count);
+      const amount = Math.round(value * (this.hasPerk('scavenger') ? 1.25 : 1) * mult);
       this.salvage += amount;
-      audio.play('salvage');
-      this.floatText(item.x, item.y, `+${amount}`, '#e8b04a');
+      audio.play('salvage', { volume: 0.8 + Math.min(0.4, (mult - 1) * 0.8) });
+      this.floatText(item.x, item.y, mult > 1 ? `+${amount} ×${mult.toFixed(1)}` : `+${amount}`, mult > 1 ? '#ffd166' : '#e8b04a');
     }
     item.destroy();
   }
@@ -1123,7 +1724,7 @@ export class GameScene extends Phaser.Scene implements EnemyWorld {
     if (this.ended) return;
     this.ended = true;
     this.mapOpen = false;
-    for (const o of [this.mapTiles, this.mapMarks, this.mapText]) o.setVisible(false);
+    for (const o of [this.mapTiles, this.mapMarks, this.mapText, this.miniMap]) o.setVisible(false);
     this.player.anims.stop();
     this.player.setVelocity(0, 0);
     this.hackGfx.clear();
@@ -1140,9 +1741,44 @@ export class GameScene extends Phaser.Scene implements EnemyWorld {
       salvage: this.salvage,
       dronesDestroyed: this.kills,
       logsFound: this.logsFound,
+      dodges: this.dodges,
+      drumsDetonated: this.drumsDetonated,
+      elitesKilled: this.elitesKilled,
+      durationMs,
+      depth: this.depth,
+      bestCombo: this.bestCombo,
+      bounties: this.bountiesClaimed,
+    });
+    after = recordRun(after, {
+      at: new Date().toISOString(),
+      ship: this.run.ship,
+      mode: this.run.mode,
+      seed: this.run.seed,
+      character: this.stats.character.id,
+      extracted,
+      salvage: this.salvage,
+      kills: this.kills,
+      durationMs,
+      ...(this.run.boss ? { boss: this.run.boss } : {}),
+      ...(this.abandoned ? { abandoned: true } : {}),
     });
     const day = this.run.mode === 'daily' ? dayFromDailySeed(this.run.seed) : null;
     if (day && extracted) after = recordDaily(after, day, this.salvage);
+    let streak: { count: number; bonus: number } | null = null;
+    if (day && extracted) {
+      const st = recordStreak(after, day);
+      after = st.save;
+      if (st.counted) streak = { count: st.save.streak.count, bonus: st.bonus };
+    }
+    const week = this.run.mode === 'weekly' ? weekFromSeed(this.run.seed) : null;
+    if (week && extracted) after = recordWeekly(after, week, this.salvage);
+    let bossResult: { firstKill: boolean; best: boolean; ms: number } | null = null;
+    if (extracted && this.bossDefeated) {
+      const prevBest = after.bosses[this.bossDefeated.id].bestMs;
+      const rec = recordBossKill(after, this.bossDefeated.id, this.bossDefeated.ms);
+      after = rec.save;
+      bossResult = { firstKill: rec.firstKill, best: !prevBest || this.bossDefeated.ms < prevBest, ms: this.bossDefeated.ms };
+    }
     const earned = newAchievements(
       {
         extracted,
@@ -1154,12 +1790,18 @@ export class GameScene extends Phaser.Scene implements EnemyWorld {
         damageTaken: this.damageTaken,
         dodges: this.dodges,
         blastKills: this.blastKills,
-        explored: exploredFraction(this.explored, this.grid),
+        // Arenas are small and open, so they don't count towards Cartographer.
+        explored: this.run.boss ? 0 : exploredFraction(this.explored, this.grid),
         eggsDestroyed: this.eggsDestroyed,
         rivalsKilled: this.rivalsKilled,
         rivalsBoarded: this.rivalsBoarded,
         hacks: this.hacks,
         elitesKilled: this.elitesKilled,
+        bossKilled: this.bossDefeated?.id ?? null,
+        weekly: week !== null,
+        bounties: this.bountiesClaimed,
+        bestCombo: this.bestCombo,
+        depth: this.depth,
       },
       before.achievements,
     );
@@ -1172,7 +1814,7 @@ export class GameScene extends Phaser.Scene implements EnemyWorld {
 
     // Results appear after the extraction / death moment has played out.
     this.time.delayedCall(extracted ? 800 : 950, () =>
-      this.showResults(extracted, reason, { before, after, day, durationMs, bonus, banked, newBest, unlockedResearch, earned }),
+      this.showResults(extracted, reason, { before, after, day, durationMs, bonus, banked, newBest, unlockedResearch, earned, bossResult, streak }),
     );
   }
 
@@ -1210,9 +1852,11 @@ export class GameScene extends Phaser.Scene implements EnemyWorld {
       newBest: boolean;
       unlockedResearch: boolean;
       earned: Achievement[];
+      bossResult: { firstKill: boolean; best: boolean; ms: number } | null;
+      streak: { count: number; bonus: number } | null;
     },
   ) {
-    const { after, day, durationMs, bonus, banked, newBest, unlockedResearch, earned } = r;
+    const { after, day, durationMs, bonus, banked, newBest, unlockedResearch, earned, bossResult, streak } = r;
     this.physics.pause();
     this.physics.world.timeScale = 1;
     this.tweens.timeScale = 1;
@@ -1238,6 +1882,16 @@ export class GameScene extends Phaser.Scene implements EnemyWorld {
       ? [`Salvage banked: ${this.salvage}${newBest ? '  (new best!)' : ''}`]
       : [reason, `Salvage lost: ${this.salvage}`];
     lines.push(`Hostiles destroyed: ${this.kills}`);
+    if (this.depth > 1) lines.push(`Deepest deck: ${this.depth}`);
+    if (streak) lines.push(`Daily streak: ${streak.count} day${streak.count === 1 ? '' : 's'}  +${streak.bonus}`);
+    if (this.run.mode === 'weekly' && extracted) lines.push(`Weekly best: ${after.weekly.best}`);
+    if (this.run.boss) {
+      const def = BOSSES[this.run.boss];
+      if (bossResult) {
+        lines.push(`${def.name} DOWN · ${formatDuration(bossResult.ms)}${bossResult.best ? ' (best)' : ''}`);
+        if (bossResult.firstKill) lines.push(`First kill bonus +${def.firstKillReward}`);
+      } else if (this.bossDefeated) lines.push(`${def.name} beaten, but you didn't get out`);
+    }
     if (this.logsFound.length) lines.push(`Data log kept: ${this.logsFound.length}`);
     if (bonus) lines.push('Chapter complete! +bonus salvage');
     if (unlockedResearch) lines.push('NEW DESTINATION: research vessels');
@@ -1251,7 +1905,9 @@ export class GameScene extends Phaser.Scene implements EnemyWorld {
 
     const retry = () => {
       audio.play('launch');
-      this.scene.restart(this.run);
+      // A deep dive retries from the top deck.
+      const { carry: _carry, ...rest } = this.run;
+      this.scene.restart({ ...rest, seed: baseSeed(this.run.seed) });
     };
     const hub = () => {
       audio.play('ui');
@@ -1294,7 +1950,9 @@ export class GameScene extends Phaser.Scene implements EnemyWorld {
           })
           .setOrigin(0.5),
       );
-      if (leaderboard.enabled) {
+      if (leaderboard.enabled && this.saveAtStart.settings.assist) {
+        status.setText('Assist mode: not posted to the daily board');
+      } else if (leaderboard.enabled) {
         leaderboard
           .submit({
             day,
@@ -1308,6 +1966,7 @@ export class GameScene extends Phaser.Scene implements EnemyWorld {
             playerId: after.playerId,
           })
           .then((r) => {
+            this.lastRank = { rank: r.rank, total: r.total };
             // Posting reserves your name, so there's no need to check it again.
             if (after.callsign !== after.callsignClaimed) storeSave(setClaimedName(loadSave(), after.callsign));
             if (status.active) status.setText(`DAILY RANK #${r.rank} of ${r.total} · best ${r.best}`);
@@ -1320,12 +1979,39 @@ export class GameScene extends Phaser.Scene implements EnemyWorld {
     }
 
     // Short delay so a held trigger doesn't skip the results screen.
-    const top = h / 2 + 22 + lines.length * 6;
+    // Three buttons need about 66px; keep them on screen on short landscape phones.
+    const top = Math.min(h / 2 + 22 + lines.length * 6, h - 66);
     this.time.delayedCall(400, () => {
       button(top, this.touch.enabled ? 'RETURN TO SHIP' : 'RETURN TO SHIP  [ENTER]', hub);
       button(top + 26, this.touch.enabled ? 'RETRY THIS DERELICT' : 'RETRY THIS DERELICT  [R]', retry);
+      const shareLabel = this.touch.enabled ? 'SHARE RESULT' : 'SHARE RESULT  [S]';
+      const shareButton = button(top + 52, shareLabel, () => share());
+      const share = () => {
+        const text = shareText({
+          run: this.run,
+          extracted,
+          salvage: this.salvage,
+          kills: this.kills,
+          durationMs: r.durationMs,
+          base: `${window.location.origin}${window.location.pathname}`,
+          rank: this.lastRank,
+        });
+        const done = (msg: string) => {
+          shareButton.setText(msg);
+          this.time.delayedCall(1600, () => shareButton.active && shareButton.setText(shareLabel));
+        };
+        audio.play('ui');
+        // Phones get the native share sheet; elsewhere it goes to the clipboard.
+        if (this.touch.enabled && typeof navigator.share === 'function') {
+          navigator.share({ text }).then(() => done('SHARED'), () => done(shareLabel));
+        } else if (navigator.clipboard) {
+          navigator.clipboard.writeText(text).then(() => done('COPIED TO CLIPBOARD'), () => done('COULD NOT COPY'));
+        } else done('COULD NOT COPY');
+      };
       this.input.keyboard?.once('keydown-ENTER', hub);
       this.input.keyboard?.once('keydown-R', retry);
+      this.input.keyboard?.on('keydown-S', share);
+      this.resultActions = { hub, retry, share };
     });
   }
 
@@ -1342,6 +2028,7 @@ export class GameScene extends Phaser.Scene implements EnemyWorld {
     };
     light('light', this.player.x, this.player.y, 120);
     light('light-small', this.exitPad.x, this.exitPad.y, 32);
+    if (this.liftPad) light('light-small', this.liftPad.x, this.liftPad.y, 32);
     for (const lamp of this.lamps) light('light-small', lamp.x, lamp.y + 8, 32);
     for (const e of this.enemies.getChildren() as Sprite[]) {
       if (e.active && kindOf(e) === 'egg') light('light-small', e.x, e.y, 32);
@@ -1363,11 +2050,32 @@ export class GameScene extends Phaser.Scene implements EnemyWorld {
     bar(20, this.oxygen.current, this.oxygen.max, low ? 0xffffff : this.isRobot ? 0xffc23d : 0x3fa7ff);
 
     this.salvageText.setText(`SALVAGE ${this.salvage}`);
+    // Combo: shows next to the salvage count while the chain is alive.
+    const left = comboTimeLeft(this.combo, this.time.now);
+    const mult = comboMultiplier(this.combo.count);
+    const showCombo = left > 0 && mult > 1;
+    this.comboText.setVisible(showCombo);
+    if (showCombo) {
+      const sx = this.salvageText.x - this.salvageText.width - 8;
+      this.comboText.setPosition(sx, 6).setText(`×${mult.toFixed(1)}`);
+      g.fillStyle(0xffd166, 0.85).fillRect(sx - this.comboText.width, 17, this.comboText.width * left, 2);
+    }
     const guns = this.weapons.map((w, i) => (i === this.weaponIndex ? `[${w.name}]` : ` ${w.name} `)).join(' ');
     this.weaponText.setText(`${guns}  · ${TOOL_LABEL[this.stats.tool.id]}`);
 
+    this.drawBossBar(g);
+
+    // Power-ups: a line under the weapons, and a ring round you while the shield's up.
+    const od = Math.max(0, Math.ceil((this.overdriveUntil - this.time.now) / 1000));
+    const parts = [od ? `OVERDRIVE ${od}s` : '', this.aegis ? `AEGIS ${'◆'.repeat(this.aegis)}` : ''].filter(Boolean);
+    this.powerText.setText(parts.join('  '));
+    if (this.aegis) {
+      const v = this.cameras.main.worldView;
+      g.lineStyle(1, 0x5ef2ff, 0.6 + 0.3 * Math.sin(this.time.now / 120)).strokeCircle(this.player.x - v.x, this.player.y - v.y, 11);
+    }
+
     // Dodge recharge, as a thin bar under your feet while it refills.
-    const ready = dodgeReadiness(this.time.now, this.lastDodgeAt, this.isRobot);
+    const ready = dodgeReadiness(this.time.now, this.lastDodgeAt, this.isRobot, this.rollRate);
     if (ready < 1) {
       const view = this.cameras.main.worldView;
       const px = this.player.x - view.x;
@@ -1394,8 +2102,14 @@ export class GameScene extends Phaser.Scene implements EnemyWorld {
     );
   }
 
-  private showBanner(title: string, subtitle: string, colour = 0x2fb6d6) {
+  showBanner(title: string, subtitle: string, colour = 0x2fb6d6) {
     const { width: w } = this.scale;
+    // One banner at a time: a new one replaces whatever is showing.
+    for (const b of this.banners) {
+      this.tweens.killTweensOf(b);
+      b.destroy();
+    }
+    this.banners = [];
     const css = `#${colour.toString(16).padStart(6, '0')}`;
     const bg = this.add.rectangle(w / 2, 62, Math.min(w - 16, 300), 34, 0x06141a, 0.9).setStrokeStyle(1, colour);
     const text = this.add
@@ -1408,7 +2122,7 @@ export class GameScene extends Phaser.Scene implements EnemyWorld {
     }
   }
 
-  private floatText(x: number, y: number, text: string, color: string) {
+  floatText(x: number, y: number, text: string, color: string) {
     const t = this.add
       .text(x, y, text, { ...FONT, fontSize: '9px', color })
       .setOrigin(0.5)
@@ -1417,18 +2131,18 @@ export class GameScene extends Phaser.Scene implements EnemyWorld {
   }
 
   /** Plays a sound at a world position, panned and faded relative to the camera. */
-  private sfx(name: SfxName, x: number, y: number) {
+  sfx(name: SfxName, x: number, y: number) {
     const cam = this.cameras.main;
     const heard = spatialise(x - cam.midPoint.x, y - cam.midPoint.y);
     if (heard) audio.play(name, heard);
   }
 
-  private shake(duration: number, intensity: number) {
+  shake(duration: number, intensity: number) {
     if (this.saveAtStart.settings.screenShake) this.cameras.main.shake(duration, intensity);
   }
 
   /** A split-second freeze that makes hits land. */
-  private hitStop(ms: number) {
+  hitStop(ms: number) {
     if (this.ended || this.physics.world.isPaused) return;
     this.physics.world.pause();
     this.time.delayedCall(ms, () => !this.ended && this.physics.world.resume());
@@ -1438,7 +2152,11 @@ export class GameScene extends Phaser.Scene implements EnemyWorld {
     if (this.ended || !this.scene.isActive()) return;
     this.player.setVelocity(0, 0);
     this.scene.launch('Pause', {
-      onAbandon: () => this.endRun(false, 'Run abandoned'),
+      summary: this.pauseSummary(),
+      onAbandon: () => {
+        this.abandoned = true;
+        this.endRun(false, 'Run abandoned');
+      },
     });
     this.scene.pause();
   }
@@ -1447,9 +2165,183 @@ export class GameScene extends Phaser.Scene implements EnemyWorld {
     return this.stats.character.resource === 'battery';
   }
 
+  // ---------------------------------------------------------------- boss arenas
+
+  private bossLabel?: Phaser.GameObjects.Text;
+  /** Results-screen buttons, for the gamepad (A: back to ship, X: retry). */
+  private resultActions: { hub: () => void; retry: () => void; share: () => void } | null = null;
+  private lastRank: { rank: number; total: number } | undefined;
+
+  private padResults() {
+    if (!this.resultActions) return;
+    if (pad.justPressed(PAD.A) || pad.justPressed(PAD.START)) this.resultActions.hub();
+    else if (pad.justPressed(PAD.X)) this.resultActions.retry();
+    else if (pad.justPressed(PAD.Y)) this.resultActions.share();
+  }
+
+  /** Boss health along the bottom of the screen, with what state it's in. */
+  private drawBossBar(g: Phaser.GameObjects.Graphics) {
+    const boss = this.boss;
+    const show = !!boss && boss.awake && !boss.dead && !this.ended;
+    if (!show) {
+      this.bossLabel?.setVisible(false);
+      return;
+    }
+    const st = boss.status();
+    const { width: w, height: h } = this.scale;
+    const bw = Math.min(240, w * 0.56);
+    const x = (w - bw) / 2;
+    // On touch screens the bottom belongs to the thumb sticks, so the bar sits up top.
+    const y = this.touch.enabled ? 58 : h - 20;
+    g.fillStyle(0x0d1220, 0.92).fillRect(x - 2, y - 2, bw + 4, 9);
+    g.fillStyle(st.vulnerable ? 0xffd166 : 0xff3b4e).fillRect(x, y, bw * (st.hp / st.max), 5);
+    g.lineStyle(1, st.vulnerable ? 0xffd166 : 0x6f7fa3, 0.8).strokeRect(x - 2.5, y - 2.5, bw + 5, 10);
+    if (!this.bossLabel) {
+      this.bossLabel = this.add
+        .text(0, 0, '', { ...FONT, fontSize: '9px', align: 'center' })
+        .setOrigin(0.5, 1)
+        .setScrollFactor(0)
+        .setDepth(101);
+    }
+    this.bossLabel
+      .setVisible(true)
+      .setPosition(w / 2, y - 3)
+      .setColor(st.vulnerable ? '#ffd166' : '#d7e3ff')
+      .setText(`${st.name}  ·  ${st.state}`);
+  }
+
+  private setupArena(arena: ArenaDeck) {
+    this.bossParts = this.physics.add.staticGroup();
+    const parts = arena.features.map((f) => {
+      const { x, y } = toWorld(f);
+      const part = this.bossParts.create(x, y, f.kind) as Sprite;
+      const hp = f.kind === 'coupling' ? 5 : 6;
+      part.setDepth(6).setData({ kind: f.kind, hp, alive: true });
+      (part.body as Phaser.Physics.Arcade.StaticBody).setSize(10, 10);
+      return part;
+    });
+    // The sealed bulkhead over the vault door.
+    const d0 = toWorld(arena.door[0]);
+    this.bulkhead = this.add.image(d0.x + TILE_SIZE / 2, d0.y, 'bulkhead').setDepth(7);
+    const bx = (arena.bossSpawn.x + 1) * TILE_SIZE;
+    const by = arena.bossSpawn.y * TILE_SIZE + TILE_SIZE / 2;
+    if (arena.boss === 'foreman') {
+      const a = SECTIONS.arena;
+      const hatches = [
+        { x: (a.x + 1) * TILE_SIZE, y: (a.y + a.h / 2) * TILE_SIZE },
+        { x: (a.x + a.w - 1) * TILE_SIZE, y: (a.y + a.h / 2) * TILE_SIZE },
+      ];
+      this.boss = new ForemanFight(this, bx, by, parts, hatches);
+    } else {
+      this.boss = new MotherFight(this, bx, by, parts);
+    }
+  }
+
+  private setupBossCollisions(boss: BossFight) {
+    const s = boss.sprite;
+    this.physics.add.collider(s, this.layer);
+    this.physics.add.collider(s, this.drums, (_b, drum) => {
+      if (boss instanceof ForemanFight && boss.charging) this.explodeDrum(drum as Sprite);
+    });
+    this.physics.add.collider(s, this.bossParts);
+    this.physics.add.collider(this.player, this.bossParts);
+    this.physics.add.collider(this.enemies, this.bossParts);
+    this.physics.add.collider(this.player, s, () => {
+      if (boss instanceof ForemanFight || boss instanceof MotherFight) boss.touchPlayer();
+    });
+    this.physics.add.overlap(this.bullets, s, (_s, b) => {
+      const bullet = b as Sprite;
+      if (!bullet.active || boss.dead) return;
+      const already = bullet.getData('hit') as Set<unknown>;
+      if (already.has(s)) return;
+      already.add(s);
+      const pierce = bullet.getData('pierce') as boolean;
+      const done = boss.hit(bullet.getData('damage') as number, pierce, bullet.x, bullet.y);
+      if (done <= 0) this.sparks.explode(4, bullet.x, bullet.y);
+      if (!pierce || done <= 0) bullet.destroy();
+    });
+    const shootPart = (b: unknown, part: unknown) => {
+      const bullet = b as Sprite;
+      if (!bullet.active) return;
+      this.sparks.explode(3, bullet.x, bullet.y);
+      const dmg = bullet.getData('damage') as number;
+      bullet.destroy();
+      boss.damagePart(part as Sprite, dmg);
+    };
+    this.physics.add.collider(this.bullets, this.bossParts, shootPart);
+    this.physics.add.collider(this.hostileShots, this.bossParts, (shot) => (shot as Sprite).destroy());
+  }
+
+  /** Whether you've walked out of the staging bay into the arena proper. */
+  private inArena(): boolean {
+    const t = this.tileAt(this.player.x, this.player.y);
+    const a = SECTIONS.arena;
+    return t.x >= a.x && t.x < a.x + a.w && t.y >= a.y && t.y < a.y + a.h - 2;
+  }
+
+  explosionAt(x: number, y: number, size: number) {
+    this.sparks.explode(Math.round(size * 1.5), x, y);
+    const ring = this.add.circle(x, y, size).setStrokeStyle(2, 0xffd166).setDepth(19).setScale(0.3);
+    this.tweens.add({ targets: ring, scale: 1.2, alpha: 0, duration: 300, onComplete: () => ring.destroy() });
+    this.sfx('explosion', x, y);
+  }
+
+  onBossDefeated(boss: BossFight) {
+    if (this.ended) return;
+    this.bossDefeated = { id: boss.def.id, ms: this.time.now - this.runStartedAt };
+    const { x, y } = boss.sprite;
+    for (let i = 0; i < 4; i++) {
+      const a = (i / 4) * Math.PI * 2;
+      this.addPickup(x + Math.cos(a) * 14, y + Math.sin(a) * 14, 'salvage', Phaser.Math.Between(20, 35));
+    }
+    this.showBanner(`${boss.def.name} DEFEATED`, 'The vault is open: grab the loot and get out', 0x3dff9a);
+    // Each boss carries a chapter 2 log the first time.
+    const log = bossLog([...this.saveAtStart.codex, ...this.logsFound], boss.def.id);
+    if (log) {
+      this.pendingLog = log;
+      this.addPickup(x, y - 18, 'datalog', 0);
+    }
+    // Open the vault.
+    for (const d of this.arena?.door ?? []) this.cutTile(d.x, d.y);
+    audio.play('doorOpen');
+    if (this.bulkhead) {
+      const door = this.bulkhead;
+      this.tweens.add({ targets: door, y: door.y - 14, alpha: 0, duration: 900, onComplete: () => door.destroy() });
+    }
+    this.shake(400, 0.008);
+  }
+
+  /** A few lines about the run for the pause screen. */
+  private pauseSummary(): string[] {
+    const where = this.run.boss
+      ? `${BOSSES[this.run.boss].name} · ${BOSSES[this.run.boss].arena.toUpperCase()}`
+      : `${vesselName(baseSeed(this.run.seed), this.run.ship)}${this.depth > 1 ? ` · DEPTH ${this.depth}` : ''}`;
+    const lines = [where, `${formatDuration(this.time.now - this.runStartedAt)} aboard · ${this.salvage} salvage · ${this.kills} down`];
+    if (this.mutators.length) lines.push(`Weekly: ${this.mutators.map((m) => m.name).join(' + ')}`);
+    else if (this.condition.id !== 'calm') lines.push(`Condition: ${this.condition.name}`);
+    const b = this.bountyTarget;
+    if (b?.active) lines.push(`Bounty: ${(b.getData('bounty') as { name: string }).name} still out there`);
+    else if (this.bountiesClaimed) lines.push('Bounty claimed');
+    if (this.pendingLog) lines.push('A data log is still aboard');
+    return lines;
+  }
+
+  private hudConditionLabel(): string {
+    const lines: string[] = [];
+    if (this.depth > 1) lines.push(`DEPTH ${this.depth}`);
+    if (this.mutators.length) lines.push(...this.mutators.map((m) => m.name.toUpperCase()));
+    else if (this.condition.id !== 'calm') lines.push(this.condition.name.toUpperCase());
+    return lines.join('\n');
+  }
+
   private currentRoom() {
     const p = this.tileAt(this.player.x, this.player.y);
     return this.deck.rooms.find((r) => p.x >= r.x && p.x < r.x + r.w && p.y >= r.y && p.y < r.y + r.h) ?? null;
+  }
+
+  /** Adrenaline doubles how fast the roll recharges. */
+  private get rollRate() {
+    return this.hasPerk('adrenaline') ? 2 : 1;
   }
 
   private barrels(): Sprite[] {
@@ -1469,15 +2361,18 @@ export class GameScene extends Phaser.Scene implements EnemyWorld {
   }
 
   /** Blast: hurts everything nearby (you too), opens cracked walls, and sets off other drums. */
-  private explodeDrum(drum: Sprite) {
+  explodeDrum(drum: Sprite) {
     if (!drum.active || drum.getData('lit')) return;
     drum.setData('lit', true);
+    this.drumsDetonated += 1;
     const { x, y } = drum;
+    const demo = this.hasPerk('demolitionist');
+    const radius = demo ? BARREL.radius * 1.4 : BARREL.radius;
     drum.destroy();
     this.sfx('explosion', x, y);
     this.sparks.explode(40, x, y);
-    const fire = this.add.circle(x, y, BARREL.radius, 0xff7b3a, 0.45).setDepth(18).setScale(0.2);
-    const ring = this.add.circle(x, y, BARREL.radius).setStrokeStyle(3, 0xffd166).setDepth(19).setScale(0.3);
+    const fire = this.add.circle(x, y, radius, 0xff7b3a, 0.45).setDepth(18).setScale(0.2);
+    const ring = this.add.circle(x, y, radius).setStrokeStyle(3, 0xffd166).setDepth(19).setScale(0.3);
     this.tweens.add({ targets: fire, scale: 1, alpha: 0, duration: 320, onComplete: () => fire.destroy() });
     this.tweens.add({ targets: ring, scale: 1.1, alpha: 0, duration: 380, onComplete: () => ring.destroy() });
     const scorch = this.add.circle(x, y, 9, 0x000000, 0.35).setDepth(1);
@@ -1490,7 +2385,7 @@ export class GameScene extends Phaser.Scene implements EnemyWorld {
     // Copy the list: killing an enemy removes it from the group mid-loop.
     for (const e of [...this.enemies.getChildren()] as Sprite[]) {
       if (!e.active || isHacked(e)) continue;
-      const dmg = blastDamage(Phaser.Math.Distance.Between(x, y, e.x, e.y), BARREL.enemyDamage);
+      const dmg = blastDamage(Phaser.Math.Distance.Between(x, y, e.x, e.y), BARREL.enemyDamage, radius);
       if (dmg <= 0) continue;
       if (!ENEMY_STATS[kindOf(e)].solid) {
         const a = Phaser.Math.Angle.Between(x, y, e.x, e.y);
@@ -1500,22 +2395,31 @@ export class GameScene extends Phaser.Scene implements EnemyWorld {
       this.damageEnemy(e, dmg);
       if (this.kills > before) this.blastKills += 1;
     }
-    const toYou = blastDamage(Phaser.Math.Distance.Between(x, y, this.player.x, this.player.y), BARREL.playerDamage);
+    if (this.boss?.awake && !this.boss.dead) {
+      const reach = Phaser.Math.Distance.Between(x, y, this.boss.sprite.x, this.boss.sprite.y) - this.boss.radius;
+      if (reach < radius) this.boss.blast();
+    }
+    for (const part of this.bossParts?.getChildren() ?? []) {
+      const pt = part as Sprite;
+      if (pt.getData('alive') && Phaser.Math.Distance.Between(x, y, pt.x, pt.y) < radius) this.boss?.breakPart(pt);
+    }
+    // Demolitionists know where to stand.
+    const toYou = demo ? 0 : blastDamage(Phaser.Math.Distance.Between(x, y, this.player.x, this.player.y), BARREL.playerDamage, radius);
     if (toYou > 0) this.hurtPlayer(toYou);
 
     // Cracked walls in the blast give way.
     const centre = this.tileAt(x, y);
-    const reach = Math.ceil(BARREL.radius / TILE_SIZE);
+    const reach = Math.ceil(radius / TILE_SIZE);
     for (let ty = centre.y - reach; ty <= centre.y + reach; ty++) {
       for (let tx = centre.x - reach; tx <= centre.x + reach; tx++) {
         if (this.grid[ty]?.[tx] !== Tile.WeakWall) continue;
         const w = toWorld({ x: tx, y: ty });
-        if (Phaser.Math.Distance.Between(x, y, w.x, w.y) <= BARREL.radius * 0.75) this.cutTile(tx, ty);
+        if (Phaser.Math.Distance.Between(x, y, w.x, w.y) <= radius * 0.75) this.cutTile(tx, ty);
       }
     }
 
     for (const other of this.barrels()) {
-      if (Phaser.Math.Distance.Between(x, y, other.x, other.y) <= BARREL.radius) {
+      if (Phaser.Math.Distance.Between(x, y, other.x, other.y) <= radius) {
         this.time.delayedCall(BARREL.chainDelayMs, () => this.explodeDrum(other));
       }
     }
@@ -1525,7 +2429,7 @@ export class GameScene extends Phaser.Scene implements EnemyWorld {
     return this.stats.perk?.id === id;
   }
 
-  private addPickup(x: number, y: number, kind: 'oxygen' | 'salvage' | 'datalog' | 'medkit', value: number) {
+  private addPickup(x: number, y: number, kind: 'oxygen' | 'salvage' | 'datalog' | 'medkit' | 'overdrive' | 'aegis', value: number) {
     const texture = kind === 'oxygen' && this.isRobot ? 'battery' : kind === 'medkit' && this.isRobot ? 'repairkit' : kind;
     const item = this.pickups.create(x, y, texture) as Sprite;
     item.setDepth(5).setData({ kind, value });
