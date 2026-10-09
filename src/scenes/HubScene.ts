@@ -1,6 +1,7 @@
 import Phaser from 'phaser';
 import { dailySeed, dailyShip, randomSeed, seedQuery, type ResolvedSeed } from '../core/seed';
 import { HubView } from '../hub/HubView';
+import { audio } from '../audio/engine';
 import { clearSave, loadSave, storeSave } from '../storage';
 
 /** Between runs: a drifting starfield behind the HTML hub screens. */
@@ -23,10 +24,14 @@ export class HubScene extends Phaser.Scene {
       this.stars.push({ img, speed: 4 + depth * 22 });
     }
 
+    audio.startMusic('hub');
+    audio.setIntensity(0);
     this.view = new HubView(loadSave(), {
       onSave: storeSave,
       onReset: clearSave,
       onLaunch: (daily) => this.launch(daily),
+      onSound: (name) => audio.play(name),
+      onSettings: (settings) => audio.setSettings(settings),
     });
     this.events.once('shutdown', () => {
       this.view?.destroy();
@@ -52,6 +57,8 @@ export class HubScene extends Phaser.Scene {
     } catch {
       /* ignore */
     }
+    audio.unlock();
+    audio.play('launch');
     this.scene.start('Game', run);
   }
 }

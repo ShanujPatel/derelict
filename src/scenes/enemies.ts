@@ -1,5 +1,6 @@
 import Phaser from 'phaser';
 import { RIVAL_CARRY_LIMIT } from '../core/rivals';
+import type { SfxName } from '../core/sfx';
 import type { EnemyKind, Point } from '../core/types';
 
 type Sprite = Phaser.Physics.Arcade.Sprite;
@@ -56,6 +57,8 @@ export interface EnemyWorld {
   nearestSalvage(e: Sprite): Sprite | null;
   /** A rival picks up a salvage pickup. */
   steal(e: Sprite, pickup: Sprite): void;
+  /** Plays a sound effect at a world position. */
+  soundAt(name: SfxName, x: number, y: number): void;
 }
 
 export const kindOf = (e: Sprite) => e.getData('kind') as EnemyKind;
@@ -132,6 +135,7 @@ export function updateEnemy(e: Sprite, world: EnemyWorld, time: number) {
         const child = world.spawnEnemy('crawler', e.x + Phaser.Math.Between(-6, 6), e.y + Phaser.Math.Between(-6, 6));
         child.setData({ parent: e, alertUntil: time + 3000 });
         e.scene.tweens.add({ targets: e, scaleX: 1.25, scaleY: 0.8, yoyo: true, duration: 120 });
+        world.soundAt('hatch', e.x, e.y);
       }
       return;
     }

@@ -15,7 +15,7 @@ interface ActiveStick {
 }
 
 interface Button {
-  id: 'swap' | 'torch';
+  id: 'swap' | 'torch' | 'pause';
   label: string;
   x: number;
   y: number;
@@ -78,6 +78,7 @@ export class TouchControls {
     this.buttons = [
       { id: 'swap', label: 'GUN', x, y: height * 0.5 },
       { id: 'torch', label: this.toolLabel, x, y: height * 0.5 - 40 },
+      { id: 'pause', label: 'II', x: width / 2, y: 16 },
     ];
     this.labels.forEach((l) => l.destroy());
     this.labels = this.buttons.map((b) =>

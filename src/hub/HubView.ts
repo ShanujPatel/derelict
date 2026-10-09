@@ -32,10 +32,13 @@ import {
   setCallsign,
   setPerk,
   setTool,
+  updateSettings,
   type SaveData,
+  type Settings,
   type ShopItem,
 } from '../core/progression';
 import { WEAPONS, type WeaponId } from '../core/weapons';
+import type { SfxName } from '../core/sfx';
 
 type Tab = 'crew' | 'loadout' | 'upgrades' | 'daily' | 'log';
 
@@ -51,6 +54,8 @@ export interface HubCallbacks {
   onLaunch: (daily: boolean) => void;
   onSave: (save: SaveData) => void;
   onReset: () => void;
+  onSound?: (name: SfxName) => void;
+  onSettings?: (settings: Settings) => void;
 }
 
 /**
@@ -99,6 +104,7 @@ export class HubView {
     this.body = this.root.querySelector('.hub-body')!;
     this.toastEl = this.root.querySelector('.hub-toast')!;
     this.root.addEventListener('click', this.onClick);
+    this.root.addEventListener('input', this.onInput);
     window.addEventListener('keydown', this.onKey);
     document.body.appendChild(this.root);
     this.render();
@@ -125,6 +131,7 @@ export class HubView {
     const d = el.dataset;
 
     if (d.tab) {
+      this.sound('ui');
       this.tab = d.tab as Tab;
       this.confirmReset = false;
       this.render();
@@ -194,13 +201,34 @@ export class HubView {
 
   private buy(item: ShopItem, label: string) {
     const result = purchase(this.save, item);
-    if (!result.ok) return this.toast(result.reason, true);
+    if (!result.ok) {
+      this.sound('denied');
+      return this.toast(result.reason, true);
+    }
+    this.sound('buy');
     this.update(result.save);
     this.toast(label);
   }
 
+  private sound(name: SfxName) {
+    this.callbacks.onSound?.(name);
+  }
+
+  /** Volume sliders and toggles in the Log tab apply live. */
+  private onInput = (e: Event) => {
+    const el = e.target as HTMLInputElement;
+    const key = el.dataset.setting as keyof Settings | undefined;
+    if (!key) return;
+    const value = el.type === 'checkbox' ? el.checked : Number(el.value) / 100;
+    this.save = updateSettings(this.save, { [key]: value });
+    this.callbacks.onSave(this.save);
+    this.callbacks.onSettings?.(this.save.settings);
+    if (el.type === 'checkbox' || e.type === 'change') this.sound('ui');
+  };
+
   private update(next: SaveData) {
     if (next === this.save) return;
+    if (next.credits === this.save.credits) this.sound('ui');
     this.save = next;
     this.callbacks.onSave(next);
     this.render();
@@ -495,6 +523,30 @@ export class HubView {
       </section>`;
   }
 
+  private settingsSection(): string {
+    const st = this.save.settings;
+    const slider = (key: 'master' | 'music' | 'sfx', label: string) => `
+      <label class="setting">
+        <span>${label}</span>
+        <input type="range" min="0" max="100" step="5" value="${Math.round(st[key] * 100)}" data-setting="${key}" aria-label="${label} volume" />
+      </label>`;
+    const toggle = (key: 'screenShake' | 'flashes', label: string) => `
+      <label class="setting toggle">
+        <span>${label}</span>
+        <input type="checkbox" ${st[key] ? 'checked' : ''} data-setting="${key}" />
+      </label>`;
+    return `<section class="hub-section"><h3>Sound &amp; display</h3>
+      <div class="card settings">
+        ${slider('master', 'Master')}
+        ${slider('music', 'Music')}
+        ${slider('sfx', 'Effects')}
+        ${toggle('screenShake', 'Screen shake')}
+        ${toggle('flashes', 'Damage flashes')}
+        <p class="hub-note">All sound is synthesised live in your browser. Press M any time to mute.</p>
+      </div>
+    </section>`;
+  }
+
   private codexSection(): string {
     const found = this.save.codex;
     return CHAPTERS.map((chapter) => {
@@ -537,6 +589,7 @@ export class HubView {
         </div>
       </section>
       ${this.codexSection()}
+      ${this.settingsSection()}
       <section class="hub-section"><h3>Move your save</h3>
         <p class="hub-note">Progress is saved in this browser. Copy a save code to carry it to another device.</p>
         <div class="btn-row"><button class="btn ghost" data-action="export">COPY SAVE CODE</button></div>

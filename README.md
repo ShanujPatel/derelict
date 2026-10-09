@@ -16,8 +16,12 @@ A real-time, top-down sci-fi roguelike that runs in the browser. Board abandoned
 | Aim and fire | Mouse / left click (hold) |
 | Swap gun | Q, 1 / 2, or mouse wheel |
 | Tool (torch, hacking or grav) | F or right click |
+| Pause | Esc or P |
+| Mute | M |
 
-**On a phone or tablet:** left thumb moves, right thumb aims and fires. The **GUN** and tool buttons sit on the right. Works in portrait and landscape.
+**On a phone or tablet:** left thumb moves, right thumb aims and fires. The **GUN** and tool buttons sit on the right, and **II** at the top pauses. Works in portrait and landscape.
+
+**Sound:** every sound effect and the music are synthesised in the browser with Web Audio. There are no audio files. Each ship type has its own theme, and drums fade in when things are hunting you. Volume sliders, screen shake and flashes are under **Log → Settings**.
 
 <img src="docs/screenshot-mobile.png" alt="Mobile portrait screenshot" width="260">
 
@@ -81,7 +85,9 @@ src/
              rules, pathfinding, oxygen, weapons, codex, rivals, leaderboard rules,
              progression (shop, saves, export codes), virtual-stick maths, screen sizing.
              No Phaser imports, so it's fully unit-tested.
-  scenes/    Phaser scenes: Boot (builds textures), Hub and Game, plus enemy AI.
+             Sound effect and music definitions (sfx, music) live here too.
+  audio/     Web Audio engine: synth voices, mixer, generative music player.
+  scenes/    Phaser scenes: Boot (builds textures), Hub, Game and Pause, plus enemy AI.
   hub/       Between-runs screens as an HTML/CSS overlay.
   net/       Leaderboard client (Supabase REST).
   ui/        Touch controls (twin virtual sticks).
@@ -101,6 +107,7 @@ See the full [game design document](docs/GDD.md).
 - [x] **v0.2** Robot character, customisation, hub with permanent unlocks, railgun, perks
 - [x] **v0.3** Research vessels, alien enemies, turrets, hacking tool, codex chapter 1
 - [x] **v0.4** Online daily leaderboard, Gravecutter rivals, grav tool
+- [x] **v0.5** Synthesised sound and music, pause menu, settings, hit-pause, death and extraction moments
 - [ ] **Later** Bosses, more codex chapters, more ship types
 
 ## Licence

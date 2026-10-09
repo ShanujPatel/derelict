@@ -1,6 +1,17 @@
 # Changelog
 
-## [0.4.0] — Unreleased
+## [0.5.0] — Unreleased
+
+### Added
+- Sound: 29 synthesised sound effects (weapons, hits, deaths, pickups, tools, alarms, footsteps, hub clicks), generated with Web Audio at runtime. No audio files. Sounds in the world are panned and faded by distance.
+- Generative music: a theme each for the hub, freighters and research vessels (drone + seeded melody), with a combat layer that fades in when enemies are hunting you.
+- Settings in **Log → Settings**: master, music and SFX volume, screen shake, flashes. Saved with your progress.
+- Pause menu (Esc / P, or the **II** touch button): resume, sound on/off, screen shake, abandon run. The run clock stops while paused, and the game pauses itself when the tab loses focus.
+- M mutes from anywhere.
+- Game feel: hit-pause on kills and when you're hit, low-oxygen heartbeat, aim look-ahead on the camera, a slow-motion death and an extraction beam before the results screen.
+- `tests/audio-core.test.ts`: sound definitions, spatial audio, music theory and settings.
+
+## [0.4.0] — 2026-10-09
 
 ### Added
 - Online Daily Derelict leaderboard on Supabase. A new DAILY tab shows today's ship, your best, the top 20 and your callsign; extracted daily runs post automatically and the end screen shows your rank.

@@ -42,6 +42,7 @@ export interface SaveData {
   callsign: string;
   /** Best extracted score on today's Daily Derelict. */
   daily: { day: string; best: number };
+  settings: Settings;
   /** Bought cosmetics, as cosmeticKey() strings. Free options are always owned. */
   cosmetics: string[];
   upgrades: Record<StatId, number>;
@@ -61,6 +62,18 @@ export interface SaveData {
     dronesDestroyed: number;
   };
 }
+
+export interface Settings {
+  /** Volumes, 0–1. */
+  master: number;
+  music: number;
+  sfx: number;
+  screenShake: boolean;
+  /** Full-screen colour flashes when hurt. */
+  flashes: boolean;
+}
+
+export const DEFAULT_SETTINGS: Settings = { master: 0.8, music: 0.6, sfx: 0.8, screenShake: true, flashes: true };
 
 export type ShopItem =
   | { kind: 'character'; id: CharacterId }
@@ -85,6 +98,7 @@ export function defaultSave(): SaveData {
     playerId: '',
     callsign: '',
     daily: { day: '', best: 0 },
+    settings: { ...DEFAULT_SETTINGS },
     cosmetics: [],
     upgrades: { health: 0, capacity: 0, speed: 0 },
     loadout: {
@@ -233,6 +247,23 @@ export function setCallsign(save: SaveData, raw: string): SaveData {
   return { ...clone(save), callsign };
 }
 
+export function updateSettings(save: SaveData, patch: Partial<Settings>): SaveData {
+  return { ...clone(save), settings: sanitizeSettings({ ...save.settings, ...patch }) };
+}
+
+export function sanitizeSettings(raw: unknown): Settings {
+  const r = isObj(raw) ? raw : {};
+  const vol = (v: unknown, d: number) => (typeof v === 'number' && Number.isFinite(v) ? Math.max(0, Math.min(1, v)) : d);
+  const flag = (v: unknown, d: boolean) => (typeof v === 'boolean' ? v : d);
+  return {
+    master: vol(r.master, DEFAULT_SETTINGS.master),
+    music: vol(r.music, DEFAULT_SETTINGS.music),
+    sfx: vol(r.sfx, DEFAULT_SETTINGS.sfx),
+    screenShake: flag(r.screenShake, DEFAULT_SETTINGS.screenShake),
+    flashes: flag(r.flashes, DEFAULT_SETTINGS.flashes),
+  };
+}
+
 /** Keeps the best extracted score for the given day. */
 export function recordDaily(save: SaveData, day: string, score: number): SaveData {
   const next = clone(save);
@@ -362,6 +393,7 @@ export function sanitizeSave(raw: unknown): SaveData {
       typeof dailyRaw.day === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(dailyRaw.day)
         ? { day: dailyRaw.day, best: num(dailyRaw.best) }
         : { day: '', best: 0 },
+    settings: sanitizeSettings(raw.settings),
     credits: num(raw.credits),
     characters,
     weapons,

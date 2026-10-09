@@ -123,7 +123,10 @@ Unlocks widen options rather than making runs trivially easy.
 
 - **Pixel art**, 16×16 tiles, limited palette per ship type (cold blues for freighters, sickly greens for research vessels).
 - Start with free CC0 asset packs (credited in the README), replace over time.
-- Chiptune / synth ambience; punchy SFX. Screen shake and hit-flash for feedback.
+- **Audio is synthesised in code (v0.5)** with Web Audio, like the art: no audio files. 29 sound effects are defined as synth layers (`src/core/sfx.ts`), with pitch jitter, cooldowns and voice limits, and are panned and faded by distance from the camera.
+- **Generative music** (`src/core/music.ts`): each place has a theme (hub, freighter, research) built from a drone, a seeded melody phrase in its own mode and tempo, and a combat layer (kick, hats, bass) that fades in with the number of enemies hunting you.
+- **Game feel:** hit-pause on kills and hits taken, screen shake, damage flashes, a low-oxygen heartbeat, aim look-ahead, a slow-motion death and an extraction beam.
+- **Settings:** master, music and SFX volume, screen shake and flashes on/off; M mutes anywhere. Pause menu on Esc/P or the touch II button, and the game pauses itself when the tab loses focus.
 
 ## 11. Tech
 
@@ -141,7 +144,8 @@ Unlocks widen options rather than making runs trivially easy.
 ```
 src/
   core/      pure logic — RNG, map generation, rules (no Phaser; fully unit-tested)
-  scenes/    Phaser scenes — Boot, Game, UI
+  audio/     Web Audio engine — synth voices, mixer, music player
+  scenes/    Phaser scenes — Boot, Hub, Game, Pause
   entities/  player, enemies, projectiles
 docs/        this document
 tests/       unit tests
@@ -159,6 +163,7 @@ Each version is a tagged GitHub release with notes.
 | **v0.2** ✅ | Robot character; customisation; Hub with permanent unlocks; save data |
 | **v0.3** ✅ | Research vessel + alien enemies; turrets; codex chapter 1; hacking tool; locked caches |
 | **v0.4** ✅ | Online daily leaderboard (Supabase); Gravecutter rival boarding party (raiders + shielded brute); grav tool |
+| **v0.5** ✅ | Synthesised SFX and generative music; settings and volume; pause menu; hit-pause; death and extraction moments |
 | **Later** | Bosses; codex chapters 2–3; more ship types; gamepad polish; accessibility options |
 
 ## 13. Open questions
@@ -166,4 +171,4 @@ Each version is a tagged GitHub release with notes.
 - Final game name.
 - Single deck per run, or several decks with a lift between them?
 - ~~Leaderboard anti-cheat level~~ Decided: light checks, enforced in both the client and the SQL.
-- Music: commission, CC0, or generate?
+- ~~Music: commission, CC0, or generate?~~ Decided: generated in code (v0.5).

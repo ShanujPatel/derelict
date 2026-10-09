@@ -27,11 +27,14 @@ import { WEAPONS, pelletAngles, type WeaponDef } from '../core/weapons';
 import { leaderboard } from '../net/leaderboard';
 import { loadSave, storeSave } from '../storage';
 import { TouchControls } from '../ui/TouchControls';
+import { audio } from '../audio/engine';
+import { combatIntensity } from '../core/music';
+import { spatialise, type SfxName } from '../core/sfx';
 import { ENEMY_STATS, RIVAL_KINDS, isHacked, kindOf, updateEnemy, type EnemyWorld } from './enemies';
 
 type Sprite = Phaser.Physics.Arcade.Sprite;
 type Keys = Record<
-  'W' | 'A' | 'S' | 'D' | 'UP' | 'LEFT' | 'DOWN' | 'RIGHT' | 'Q' | 'F' | 'R' | 'ENTER' | 'ONE' | 'TWO',
+  'W' | 'A' | 'S' | 'D' | 'UP' | 'LEFT' | 'DOWN' | 'RIGHT' | 'Q' | 'F' | 'R' | 'ENTER' | 'ONE' | 'TWO' | 'ESC' | 'P',
   Phaser.Input.Keyboard.Key
 >;
 
@@ -110,6 +113,12 @@ export class GameScene extends Phaser.Scene implements EnemyWorld {
   private runStartedAt = 0;
   private rivals!: RivalEvent;
   private rivalsArrived = false;
+  private nextStepAt = 0;
+  private nextHeartbeatAt = 0;
+  private nextHackTickAt = 0;
+  private pausedAt = 0;
+  private lookX = 0;
+  private lookY = 0;
   private ended = false;
 
   constructor() {
@@ -136,6 +145,11 @@ export class GameScene extends Phaser.Scene implements EnemyWorld {
     this.hack = null;
     this.rivals = rivalEvent(this.run.seed, this.run.ship);
     this.rivalsArrived = false;
+    this.nextStepAt = 0;
+    this.nextHeartbeatAt = 0;
+    this.nextHackTickAt = 0;
+    this.lookX = 0;
+    this.lookY = 0;
     this.ended = false;
     this.lamps = [];
     this.endScreen = [];
@@ -155,9 +169,27 @@ export class GameScene extends Phaser.Scene implements EnemyWorld {
     this.showIntro();
 
     this.runStartedAt = this.time.now;
+    audio.setSettings(this.saveAtStart.settings);
+    audio.startMusic(this.run.ship);
+    audio.setIntensity(0);
+
+    // Pause: Esc/P, the touch pause button, or automatically when the tab loses focus.
+    this.events.on('pause', () => (this.pausedAt = this.game.loop.time));
+    this.events.on('resume', () => {
+      // Don't let paused time count towards the run clock or the rivals' arrival.
+      this.runStartedAt += this.game.loop.time - this.pausedAt;
+      // Settings may have changed in the pause menu.
+      this.saveAtStart = { ...this.saveAtStart, settings: loadSave().settings };
+    });
+    const autoPause = () => this.openPause();
+    this.game.events.on(Phaser.Core.Events.BLUR, autoPause);
+
     this.scale.on('resize', this.layout, this);
     this.events.once('shutdown', () => {
       this.scale.off('resize', this.layout, this);
+      this.game.events.off(Phaser.Core.Events.BLUR, autoPause);
+      this.events.off('pause');
+      this.events.off('resume');
       this.touch.destroy();
     });
     this.layout();
@@ -257,7 +289,7 @@ export class GameScene extends Phaser.Scene implements EnemyWorld {
     const kb = this.input.keyboard;
     if (!kb) throw new Error('Keyboard input unavailable');
     // No key capture, so typing still works in the hub after a run.
-    this.keys = kb.addKeys('W,A,S,D,UP,LEFT,DOWN,RIGHT,Q,F,R,ENTER,ONE,TWO', false) as Keys;
+    this.keys = kb.addKeys('W,A,S,D,UP,LEFT,DOWN,RIGHT,Q,F,R,ENTER,ONE,TWO,ESC,P', false) as Keys;
     this.input.mouse?.disableContextMenu();
     this.input.on('wheel', () => this.switchWeapon());
     this.touch = new TouchControls(this, TOOL_LABEL[this.stats.tool.id]);
@@ -358,7 +390,12 @@ export class GameScene extends Phaser.Scene implements EnemyWorld {
     return (this.enemies.getChildren() as Sprite[]).filter((e) => e.active && !isHacked(e));
   }
 
+  soundAt(name: SfxName, x: number, y: number) {
+    this.sfx(name, x, y);
+  }
+
   shootAtPlayer(x: number, y: number, angle: number, speed: number, damage: number, texture: string) {
+    this.sfx(texture === 'acid' ? 'acid' : 'enemyShot', x, y);
     const shot = this.hostileShots.create(x, y, texture) as Sprite;
     shot.setDepth(12).setCircle(2).setRotation(angle).setData('damage', damage);
     if (texture === 'bullet') shot.setTint(0xff5a6a);
@@ -367,6 +404,7 @@ export class GameScene extends Phaser.Scene implements EnemyWorld {
   }
 
   shootAtEnemies(x: number, y: number, angle: number) {
+    this.sfx('enemyShot', x, y);
     this.makeBullet(x, y, angle, WEAPONS.blaster).setTint(0x5ef2ff);
   }
 
@@ -428,8 +466,9 @@ export class GameScene extends Phaser.Scene implements EnemyWorld {
       e.setAlpha(0);
       this.tweens.add({ targets: e, alpha: 1, duration: 600, delay: i * 150 });
     });
-    this.cameras.main.shake(300, 0.01);
+    this.shake(300, 0.01);
     this.showBanner('GRAVECUTTERS DOCKING', 'Rival salvagers are after your loot', 0xff5a6a);
+    audio.play('alarm');
   }
 
   // ---------------------------------------------------------------- loop
@@ -450,8 +489,22 @@ export class GameScene extends Phaser.Scene implements EnemyWorld {
       if (this.hp <= 0) return this.endRun(false, this.isRobot ? 'Battery flat' : 'Oxygen depleted');
     }
 
+    this.updateAudio(time);
     this.drawLighting();
     this.drawHud();
+  }
+
+  private updateAudio(time: number) {
+    let hunting = 0;
+    for (const e of this.enemies.getChildren() as Sprite[]) {
+      if (!e.active || isHacked(e) || time > (e.getData('alertUntil') ?? 0)) continue;
+      if (Phaser.Math.Distance.Between(e.x, e.y, this.player.x, this.player.y) < 260) hunting++;
+    }
+    audio.setIntensity(combatIntensity(hunting));
+    if (this.oxygen.current < 25 && time > this.nextHeartbeatAt) {
+      this.nextHeartbeatAt = time + (this.oxygen.current < 10 ? 650 : 950);
+      audio.play('heartbeat', { volume: 0.8 });
+    }
   }
 
   private updatePlayer(time: number) {
@@ -469,8 +522,13 @@ export class GameScene extends Phaser.Scene implements EnemyWorld {
     const speed = PLAYER_SPEED * this.stats.speedMultiplier;
     this.player.setVelocity(ix * speed, iy * speed);
     const moving = Math.abs(ix) + Math.abs(iy) > 0.05;
-    if (moving) this.player.anims.play(this.walkAnim, true);
-    else this.player.anims.stop();
+    if (moving) {
+      this.player.anims.play(this.walkAnim, true);
+      if (time > this.nextStepAt) {
+        this.nextStepAt = time + (this.isRobot ? 230 : 300);
+        audio.play('step', { volume: this.isRobot ? 1 : 0.7 });
+      }
+    } else this.player.anims.stop();
     this.playerShadow.setPosition(this.player.x, this.player.y + 7);
 
     // Aim: touch aim stick, else mouse, else face the direction of travel.
@@ -484,6 +542,17 @@ export class GameScene extends Phaser.Scene implements EnemyWorld {
       aim = Phaser.Math.Angle.Between(this.player.x, this.player.y, target.x, target.y);
     }
     this.player.setRotation(aim);
+
+    // Lean the camera a little towards where you're aiming.
+    const aiming = t.enabled ? t.aim.magnitude > 0 || moving : true;
+    this.lookX = Phaser.Math.Linear(this.lookX, aiming ? -Math.cos(aim) * 24 : 0, 0.08);
+    this.lookY = Phaser.Math.Linear(this.lookY, aiming ? -Math.sin(aim) * 24 : 0, 0.08);
+    this.cameras.main.setFollowOffset(this.lookX, this.lookY);
+
+    if (Phaser.Input.Keyboard.JustDown(k.ESC) || Phaser.Input.Keyboard.JustDown(k.P) || t.consume('pause')) {
+      this.openPause();
+      return;
+    }
 
     if (Phaser.Input.Keyboard.JustDown(k.Q) || t.consume('swap')) this.switchWeapon();
     if (Phaser.Input.Keyboard.JustDown(k.ONE)) this.weaponIndex = 0;
@@ -524,6 +593,7 @@ export class GameScene extends Phaser.Scene implements EnemyWorld {
   }
 
   private fire(weapon: WeaponDef, aim: number) {
+    audio.play(weapon.id, { volume: 0.9 });
     for (const angle of pelletAngles(weapon, aim)) {
       const b = this.makeBullet(
         this.player.x + Math.cos(angle) * 9,
@@ -538,7 +608,7 @@ export class GameScene extends Phaser.Scene implements EnemyWorld {
       .setRotation(aim)
       .setVisible(true);
     this.time.delayedCall(45, () => this.muzzle.setVisible(false));
-    this.cameras.main.shake(40, weapon.pellets > 1 ? 0.004 : 0.0015);
+    this.shake(40, weapon.pellets > 1 ? 0.004 : 0.0015);
   }
 
   /** Cuts a weak wall directly in front of the player. */
@@ -559,8 +629,9 @@ export class GameScene extends Phaser.Scene implements EnemyWorld {
       this.oxygen = spendOxygen(this.oxygen, this.hasPerk('cold-cutter') ? 1 : TORCH_COST);
       const w = toWorld(t);
       this.sparks.explode(24, w.x, w.y);
-      this.cameras.main.shake(120, 0.006);
+      this.shake(120, 0.006);
       this.floatText(w.x, w.y - 8, 'CUT', '#ffd166');
+      audio.play('torch');
       return;
     }
   }
@@ -570,6 +641,7 @@ export class GameScene extends Phaser.Scene implements EnemyWorld {
     const { x, y } = this.player;
     this.oxygen = spendOxygen(this.oxygen, GRAV_COST);
 
+    audio.play('grav');
     const wave = this.add.graphics({ x, y }).setDepth(15);
     wave.fillStyle(0x9f8cff, 0.3).slice(0, 0, GRAV_RANGE, aim - GRAV_CONE, aim + GRAV_CONE).fillPath();
     wave.lineStyle(2, 0xc9bdff, 0.9).beginPath();
@@ -577,7 +649,7 @@ export class GameScene extends Phaser.Scene implements EnemyWorld {
     wave.strokePath();
     wave.setScale(0.35);
     this.tweens.add({ targets: wave, scale: 1, alpha: 0, duration: 280, onComplete: () => wave.destroy() });
-    this.cameras.main.shake(90, 0.005);
+    this.shake(90, 0.005);
 
     for (const e of this.enemies.getChildren() as Sprite[]) {
       if (!e.active || isHacked(e) || ENEMY_STATS[kindOf(e)].solid || !inGravCone(x, y, aim, e.x, e.y)) continue;
@@ -623,6 +695,7 @@ export class GameScene extends Phaser.Scene implements EnemyWorld {
       .sort((a, b) => a.d - b.d)[0];
     if (!near) {
       this.floatText(this.player.x, this.player.y - 12, 'NOTHING TO HACK', '#9fb0d0');
+      audio.play('denied');
       return;
     }
     if (this.hack?.target === near.t) return;
@@ -636,10 +709,15 @@ export class GameScene extends Phaser.Scene implements EnemyWorld {
     const d = Phaser.Math.Distance.Between(this.player.x, this.player.y, target.x, target.y);
     if (!target.active || d > HACK_BREAK_RANGE) {
       this.floatText(this.player.x, this.player.y - 12, 'HACK LOST', '#ff5a6a');
+      audio.play('hackFail');
       this.hack = null;
       return;
     }
     this.hack.progress += seconds / this.stats.hackSeconds;
+    if (this.time.now > this.nextHackTickAt) {
+      this.nextHackTickAt = this.time.now + 140;
+      audio.play('hackTick', { volume: 0.6 + this.hack.progress * 0.4 });
+    }
     const start = -Math.PI / 2;
     g.lineStyle(3, 0x0d1220, 0.8).strokeCircle(target.x, target.y, 12);
     g.lineStyle(2, 0x5ef2ff, 1).beginPath();
@@ -656,11 +734,13 @@ export class GameScene extends Phaser.Scene implements EnemyWorld {
       target.setData('hacked', true).setFrame(1);
       (target.getData('barrel') as Phaser.GameObjects.Image).setTint(0x9ff6ff);
       this.floatText(target.x, target.y - 12, 'TURRET HACKED', '#5ef2ff');
+      audio.play('hackDone');
     } else {
       target.setData('open', true).setFrame(1);
       const a = Phaser.Math.Angle.Between(target.x, target.y, this.player.x, this.player.y);
       this.addPickup(target.x + Math.cos(a) * 14, target.y + Math.sin(a) * 14, 'salvage', target.getData('value'));
       this.floatText(target.x, target.y - 12, 'CACHE OPEN', '#3dff9a');
+      audio.play('cache');
     }
     this.sparks.explode(14, target.x, target.y);
   }
@@ -676,6 +756,7 @@ export class GameScene extends Phaser.Scene implements EnemyWorld {
     if (kindOf(enemy) === 'brute' && hitsShield(enemy.rotation, angle, pierce)) {
       // Deflected by the riot shield: flank it, stun it with the grav tool, or use the railgun.
       this.sparks.explode(5, bullet.x, bullet.y);
+      this.sfx('shieldBlock', enemy.x, enemy.y);
       bullet.destroy();
       enemy.setData('alertUntil', this.time.now + 4000);
       return;
@@ -687,6 +768,7 @@ export class GameScene extends Phaser.Scene implements EnemyWorld {
 
   private damageEnemy(enemy: Sprite, amount: number) {
     const hp = (enemy.getData('hp') as number) - amount;
+    if (hp > 0) this.sfx('hit', enemy.x, enemy.y);
     enemy.setData({ hp, alertUntil: this.time.now + 4000 });
     enemy.setTintFill(0xffffff);
     this.time.delayedCall(60, () => enemy.active && enemy.clearTint());
@@ -697,9 +779,11 @@ export class GameScene extends Phaser.Scene implements EnemyWorld {
     const kind = kindOf(enemy);
     const alien = kind === 'crawler' || kind === 'spitter' || kind === 'egg';
     this.sparks.explode(alien ? 18 : 30, enemy.x, enemy.y);
+    this.sfx(alien ? 'alienDie' : 'mechDie', enemy.x, enemy.y);
+    this.hitStop(kind === 'crawler' ? 25 : 55);
     const ring = this.add.circle(enemy.x, enemy.y, 4).setStrokeStyle(2, alien ? 0x9bff5c : 0xffd166).setDepth(19);
     this.tweens.add({ targets: ring, scale: 4, alpha: 0, duration: 260, onComplete: () => ring.destroy() });
-    this.cameras.main.shake(80, 0.006);
+    this.shake(80, 0.006);
     (enemy.getData('shadow') as Phaser.GameObjects.Image | undefined)?.destroy();
     (enemy.getData('barrel') as Phaser.GameObjects.Image | undefined)?.destroy();
     const parent = enemy.getData('parent') as Sprite | undefined;
@@ -721,14 +805,16 @@ export class GameScene extends Phaser.Scene implements EnemyWorld {
     if (this.time.now < this.invulnerableUntil || this.ended) return;
     this.invulnerableUntil = this.time.now + 800;
     this.hp -= amount * (1 - this.stats.armour);
+    audio.play('playerHurt');
+    this.hitStop(70);
     if (this.hp <= 0 && this.hasPerk('second-wind') && !this.secondWindUsed) {
       this.secondWindUsed = true;
       this.hp = 1;
       this.invulnerableUntil = this.time.now + 2000;
       this.floatText(this.player.x, this.player.y - 12, 'SECOND WIND', '#3dff9a');
     }
-    this.cameras.main.shake(140, 0.012);
-    this.cameras.main.flash(80, 120, 0, 0);
+    this.shake(140, 0.012);
+    if (this.saveAtStart.settings.flashes) this.cameras.main.flash(80, 120, 0, 0);
     this.player.setTintFill(0xff5566);
     this.time.delayedCall(90, () => this.player.clearTint());
     this.tweens.add({ targets: this.player, alpha: 0.3, yoyo: true, repeat: 3, duration: 90 });
@@ -746,14 +832,17 @@ export class GameScene extends Phaser.Scene implements EnemyWorld {
     const value = item.getData('value') as number;
     if (kind === 'oxygen') {
       this.oxygen = refillOxygen(this.oxygen, value);
+      audio.play('oxygen');
       this.floatText(item.x, item.y, `+${value} ${this.isRobot ? 'PWR' : 'O₂'}`, this.isRobot ? '#ffd166' : '#6fd6ff');
     } else if (kind === 'datalog' && this.pendingLog) {
       this.logsFound.push(this.pendingLog.id);
+      audio.play('datalog');
       this.showBanner('DATA LOG RECOVERED', this.pendingLog.title);
       this.pendingLog = null;
     } else {
       const amount = this.hasPerk('scavenger') ? Math.round(value * 1.25) : value;
       this.salvage += amount;
+      audio.play('salvage');
       this.floatText(item.x, item.y, `+${amount}`, '#e8b04a');
     }
     item.destroy();
@@ -762,11 +851,14 @@ export class GameScene extends Phaser.Scene implements EnemyWorld {
   private endRun(extracted: boolean, reason = '') {
     if (this.ended) return;
     this.ended = true;
-    this.physics.pause();
     this.player.anims.stop();
+    this.player.setVelocity(0, 0);
     this.hackGfx.clear();
     for (const b of this.banners) b.destroy();
     this.drawHud();
+    audio.setIntensity(0);
+    if (extracted) this.extractionMoment();
+    else this.deathMoment();
 
     const durationMs = this.time.now - this.runStartedAt;
     const before = loadSave();
@@ -784,6 +876,52 @@ export class GameScene extends Phaser.Scene implements EnemyWorld {
     const newBest = extracted && this.salvage > before.stats.bestHaul;
     const unlockedResearch = !isResearchUnlocked(before.codex) && isResearchUnlocked(after.codex);
 
+    // Results appear after the extraction / death moment has played out.
+    this.time.delayedCall(extracted ? 800 : 950, () =>
+      this.showResults(extracted, reason, { before, after, day, durationMs, bonus, banked, newBest, unlockedResearch }),
+    );
+  }
+
+  private extractionMoment() {
+    this.physics.pause();
+    audio.play('extract');
+    const { x, y } = this.player;
+    const beam = this.add.rectangle(x, y - 60, 14, 140, 0x3dff9a, 0.35).setDepth(16).setScale(0.2, 1);
+    this.tweens.add({ targets: beam, scaleX: 1, duration: 200, yoyo: true, hold: 350 });
+    this.tweens.add({ targets: [this.player, this.playerShadow], scale: 0, alpha: 0, y: '-=12', duration: 600, ease: 'Quad.easeIn' });
+    if (this.saveAtStart.settings.flashes) this.cameras.main.flash(250, 61, 255, 154);
+  }
+
+  private deathMoment() {
+    audio.play('death');
+    // Slow motion while the camera closes in.
+    this.physics.world.timeScale = 4;
+    this.tweens.timeScale = 0.4;
+    this.cameras.main.zoomTo(1.2, 700, 'Sine.easeOut');
+    if (this.saveAtStart.settings.flashes) this.cameras.main.flash(300, 160, 0, 0);
+    this.tweens.add({ targets: this.player, angle: '+=200', alpha: 0.3, duration: 350 });
+    this.sparks.explode(40, this.player.x, this.player.y);
+  }
+
+  private showResults(
+    extracted: boolean,
+    reason: string,
+    r: {
+      before: SaveData;
+      after: SaveData;
+      day: string | null;
+      durationMs: number;
+      bonus: boolean;
+      banked: number;
+      newBest: boolean;
+      unlockedResearch: boolean;
+    },
+  ) {
+    const { after, day, durationMs, bonus, banked, newBest, unlockedResearch } = r;
+    this.physics.pause();
+    this.physics.world.timeScale = 1;
+    this.tweens.timeScale = 1;
+    this.cameras.main.setZoom(1);
     const { width: w, height: h } = this.scale;
     const ui = <T extends Phaser.GameObjects.Text | Phaser.GameObjects.Rectangle>(o: T) => {
       o.setScrollFactor(0).setDepth(300);
@@ -813,8 +951,12 @@ export class GameScene extends Phaser.Scene implements EnemyWorld {
     // Keep the title clear of the summary however many lines it has.
     title.setY(summary.y - summary.height / 2 - (extracted && day ? 34 : 18));
 
-    const retry = () => this.scene.restart(this.run);
+    const retry = () => {
+      audio.play('launch');
+      this.scene.restart(this.run);
+    };
     const hub = () => {
+      audio.play('ui');
       try {
         window.history.replaceState(null, '', window.location.pathname);
       } catch {
@@ -956,6 +1098,33 @@ export class GameScene extends Phaser.Scene implements EnemyWorld {
       .setOrigin(0.5)
       .setDepth(95);
     this.tweens.add({ targets: t, y: y - 14, alpha: 0, duration: 700, onComplete: () => t.destroy() });
+  }
+
+  /** Plays a sound at a world position, panned and faded relative to the camera. */
+  private sfx(name: SfxName, x: number, y: number) {
+    const cam = this.cameras.main;
+    const heard = spatialise(x - cam.midPoint.x, y - cam.midPoint.y);
+    if (heard) audio.play(name, heard);
+  }
+
+  private shake(duration: number, intensity: number) {
+    if (this.saveAtStart.settings.screenShake) this.cameras.main.shake(duration, intensity);
+  }
+
+  /** A split-second freeze that makes hits land. */
+  private hitStop(ms: number) {
+    if (this.ended || this.physics.world.isPaused) return;
+    this.physics.world.pause();
+    this.time.delayedCall(ms, () => !this.ended && this.physics.world.resume());
+  }
+
+  private openPause() {
+    if (this.ended || !this.scene.isActive()) return;
+    this.player.setVelocity(0, 0);
+    this.scene.launch('Pause', {
+      onAbandon: () => this.endRun(false, 'Run abandoned'),
+    });
+    this.scene.pause();
   }
 
   private get isRobot(): boolean {
