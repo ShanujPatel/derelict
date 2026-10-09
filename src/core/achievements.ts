@@ -1,3 +1,4 @@
+import type { BossId } from './bosses';
 import type { ShipType } from './types';
 
 /**
@@ -23,7 +24,7 @@ export interface RunSummary {
   hacks: number;
   elitesKilled: number;
   /** The boss you beat this run, if any. */
-  bossKilled: 'foreman' | 'mother' | null;
+  bossKilled: BossId | null;
   /** A weekly challenge run. */
   weekly: boolean;
   bounties: number;
@@ -31,6 +32,8 @@ export interface RunSummary {
   bestCombo: number;
   /** Deck you ended on (deep dives). */
   depth: number;
+  /** Ore veins cut open on a mining hauler. */
+  oreVeins?: number;
 }
 
 export interface Achievement {
@@ -139,6 +142,20 @@ export const ACHIEVEMENTS: readonly Achievement[] = [
     description: 'Defeat the Bloom Mother.',
     reward: 60,
     earned: (r) => r.bossKilled === 'mother',
+  },
+  {
+    id: 'mutiny',
+    name: 'Mutiny',
+    description: 'Defeat the Hollow Captain.',
+    reward: 70,
+    earned: (r) => r.bossKilled === 'captain',
+  },
+  {
+    id: 'prospector',
+    name: 'Prospector',
+    description: 'Cut open 5 ore veins on a mining hauler and extract.',
+    reward: 60,
+    earned: (r) => r.extracted && r.ship === 'mining' && (r.oreVeins ?? 0) >= 5,
   },
   {
     id: 'bounty-hunter',

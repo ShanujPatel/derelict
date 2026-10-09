@@ -42,5 +42,20 @@ const resize = () => {
 window.addEventListener('resize', resize);
 window.addEventListener('orientationchange', resize);
 
+// The splash in index.html covers the download; fade it once the game is running.
+game.events.once('ready', () => {
+  const splash = document.getElementById('splash');
+  if (!splash) return;
+  splash.classList.add('gone');
+  setTimeout(() => splash.remove(), 400);
+});
+
+// Installable app + offline play: the service worker is built with the game (see vite.config.ts).
+if (import.meta.env.PROD && 'serviceWorker' in navigator) {
+  window.addEventListener('load', () => {
+    navigator.serviceWorker.register('./sw.js').catch(() => undefined);
+  });
+}
+
 // Handy for poking at the game from the browser console during development.
 if (import.meta.env.DEV) Object.assign(window, { game, audio });

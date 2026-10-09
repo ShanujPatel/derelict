@@ -56,6 +56,36 @@ export function checkSubmission(s: ScoreSubmission): Plausibility {
   return { ok: true };
 }
 
+/** The weekly board allows a bit more: mutators like Jackpot make salvage richer. */
+export const WEEKLY_LIMITS = {
+  maxScore: 2500,
+  minDurationMs: 20_000,
+  maxDurationMs: 2 * 60 * 60 * 1000,
+  maxRate: 18,
+} as const;
+
+/** 'weekly-2026-W41' -> '2026-W41'; null for any other seed. */
+export function weekFromWeeklySeed(seed: string): string | null {
+  const m = /^weekly-(\d{4}-W\d{2})$/.exec(seed);
+  return m ? m[1] : null;
+}
+
+export interface WeeklySubmission extends Omit<ScoreSubmission, 'day'> {
+  week: string;
+}
+
+export function checkWeeklySubmission(s: WeeklySubmission): Plausibility {
+  if (weekFromWeeklySeed(s.seed) !== s.week) return { ok: false, reason: 'Not a weekly seed' };
+  if (!CALLSIGN_PATTERN.test(s.callsign)) return { ok: false, reason: 'Invalid callsign' };
+  if (!/^[0-9a-f-]{36}$/i.test(s.playerId)) return { ok: false, reason: 'Invalid player id' };
+  if (!Number.isInteger(s.score) || s.score < 0 || s.score > WEEKLY_LIMITS.maxScore) return { ok: false, reason: 'Score out of range' };
+  if (s.durationMs < WEEKLY_LIMITS.minDurationMs || s.durationMs > WEEKLY_LIMITS.maxDurationMs) {
+    return { ok: false, reason: 'Run length out of range' };
+  }
+  if (s.score / (s.durationMs / 1000) > WEEKLY_LIMITS.maxRate) return { ok: false, reason: 'Score too fast' };
+  return { ok: true };
+}
+
 export interface BoardEntry {
   rank: number;
   callsign: string;

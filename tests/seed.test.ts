@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { dailySeed, dailyShip, hashString, randomSeed, resolveSeed, seedQuery } from '../src/core/seed';
+import { MINING_DAILY_FROM, dailySeed, dailyShip, hashString, randomSeed, resolveSeed, seedQuery } from '../src/core/seed';
 
 describe('hashString', () => {
   it('is stable', () => {
@@ -59,11 +59,19 @@ describe('resolveSeed', () => {
 });
 
 describe('dailyShip', () => {
-  it('alternates ship types across days', () => {
+  it('alternates freighters and research vessels before mining haulers joined', () => {
     const ships = new Set(
-      Array.from({ length: 14 }, (_, i) => dailyShip(dailySeed(new Date(Date.UTC(2026, 9, 1 + i))))),
+      Array.from({ length: 11 }, (_, i) => dailyShip(dailySeed(new Date(Date.UTC(2026, 9, 1 + i))))),
     );
     expect(ships).toEqual(new Set(['freighter', 'research']));
+  });
+
+  it('rotates through all three ship types from 12 October 2026', () => {
+    expect(MINING_DAILY_FROM).toBe('2026-10-12');
+    const ships = new Set(
+      Array.from({ length: 30 }, (_, i) => dailyShip(dailySeed(new Date(Date.UTC(2026, 9, 12 + i))))),
+    );
+    expect(ships).toEqual(new Set(['freighter', 'research', 'mining']));
   });
 });
 

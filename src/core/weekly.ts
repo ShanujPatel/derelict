@@ -93,10 +93,23 @@ export function weekFromSeed(seed: string): string | null {
   return m ? m[1] : null;
 }
 
+export const MINING_WEEKLY_FROM = '2026-W42';
+
 /** This week's ship type and two different mutators, from the seed. */
 export function weeklySetup(seed: string): { ship: ShipType; mutators: Mutator[] } {
   const rng = createRng(hashString(`weekly:${seed}`));
-  const ship: ShipType = rng.chance(0.5) ? 'freighter' : 'research';
+  // From week 42 of 2026 the weekly can be any of the three ship types; earlier weeks keep theirs.
+  const roll = rng.next();
+  const three = (weekFromSeed(seed) ?? '') >= MINING_WEEKLY_FROM;
+  const ship: ShipType = three
+    ? roll < 1 / 3
+      ? 'freighter'
+      : roll < 2 / 3
+        ? 'research'
+        : 'mining'
+    : roll < 0.5
+      ? 'freighter'
+      : 'research';
   const ids = Object.keys(MUTATORS) as MutatorId[];
   const first = ids[rng.int(0, ids.length - 1)];
   const rest = ids.filter((id) => id !== first);

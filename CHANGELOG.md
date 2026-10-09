@@ -1,11 +1,36 @@
 # Changelog
 
-## [0.9.0] — Unreleased: Hall of fame
+## [1.0.0] — Unreleased: The Saw-Tooth
 
 ### Added
-- **All-time hall of fame** in its own **RANKS** tab in the hub: 19 boards in four groups. *Salvage*: total banked, biggest single haul. *Records*: ships cleared, deepest dive, longest daily streak. *Bosses*: fastest Foreman and Bloom Mother kills. *Kills*: all hostiles, elites, bounties, and one board per hostile type (drones, turrets, mimics, crawlers, stalkers, spitters, egg sacs, raiders, brutes). Shows the top 20 plus your own row; each board is cached for a minute.
+- **Mining haulers**, a third ship type: big ore holds in rusty ochre with amber lights and their own music. **Sappers** keep their distance and lay proximity mines (they blink once armed, then go off a moment after you get close; shoot them from range). **Sweeper lasers** sit in the middle of big holds and sweep a cutting beam that walls stop (roll through it, cross behind it, or hack it to burn hostiles). Cracked walls are **ore veins**, plus extra veins in the solid rock: cut or blast them for salvage. Unlocked by the ledger log in chapter 2 or after 6 extractions.
+- **The Hollow Captain**, a third boss in a mining hold: a deflector shield powered by three pylons (break them all and it drops for 7 seconds before they reboot), rifle bursts, lobbed grenades with warning rings that the grav tool throws back at him through his shield, and in phase two blinking and raider reinforcements. First kill pays 240.
+- **Codex chapter 3, The Saw-Tooth**: five logs on mining haulers and one the Captain carries.
+- **Weekly online board**: weekly runs post to their own board; the weekly card shows the top five and the results screen your rank.
+- **Daily ghosts**: race a see-through replay of the day's best run (or your own best, offline). Your best daily run's path is posted with your score. Compact format in `src/core/ghost.ts` (about 8 KB for five minutes). Toggle under Log → Settings.
+- **Seed explorer** (`map.html`): any seed's full deck, hostiles, loot, hazards, bounty, exit and lift, with a summary; links from Log → Recent runs.
+- **Installable, offline app**: web app manifest, icons, and a service worker generated at build time with the exact file list.
+- Achievements *Mutiny* (beat the Captain) and *Prospector* (cut 5 ore veins on a mining hauler and extract), with trophy colours.
+- Tips for mines, sweepers and ore; field manual entries; hall of fame columns for sappers, sweepers and the Captain.
+
+### Changed
+- **Faster loading**: a splash appears immediately; Phaser's arcade-only build (about 10% smaller) ships in its own long-cached file; shared game logic is its own chunk.
+- From 12 October 2026 the Daily Derelict, and from week 42 the Weekly Challenge, can be any of the three ship types. Earlier days and weeks keep their ships.
+- README: gameplay GIF and new screenshots.
+
+### Fixed
+- The daily board's table only allowed freighters and research vessels; the SQL now accepts mining haulers.
+- The ship destination is checked after save stats load, so an unlock by extractions survives a reload.
+
+### Upgrading
+- Re-run `docs/supabase.sql` in the Supabase SQL Editor before deploying.
+
+## [0.9.0] — 2026-10-09: Hall of fame
+
+### Added
+- **All-time hall of fame** in its own **RANKS** tab in the hub: one table with a row per player and 19 columns in four groups. *Salvage*: total banked, biggest single haul. *Records*: ships cleared, deepest dive, longest daily streak. *Bosses*: fastest Foreman and Bloom Mother kills. *Kills*: all hostiles, elites, bounties, and one column per hostile type (drones, turrets, mimics, crawlers, stalkers, spitters, egg sacs, raiders, brutes). Sorted by total salvage banked; tap a heading to sort by any column (boss times fastest first). Rank and name stay pinned while the table scrolls sideways on phones. Shows the top 25 plus your own row; each sort is cached for a minute.
 - Every finished run (extracted or not) adds to your totals once your name is claimed. Kills count either way; salvage, extractions and boss times only count when you get out. Assist mode runs aren't posted. Kills by type, elites and bounties carry down deep-dive lifts.
-- Database: `player_totals` table, `submit_run` (checks run length, depth, salvage rate, kills per kind and per second, elites, bounties, boss times, and 200 runs a day per player) and `get_hall_of_fame`. Rules mirrored in `src/core/hallOfFame.ts`; both are tested (the SQL in PGlite).
+- Database: `player_totals` table, `get_hall_table` (every stat per player, sorted by one column), `submit_run` (checks run length, depth, salvage rate, kills per kind and per second, elites, bounties, boss times, and 200 runs a day per player) and `get_hall_of_fame`. Rules mirrored in `src/core/hallOfFame.ts`; both are tested (the SQL in PGlite).
 
 ### Upgrading
 - Re-run `docs/supabase.sql` in the Supabase SQL Editor. Until then the hall of fame shows an error and runs aren't counted; the daily board keeps working.

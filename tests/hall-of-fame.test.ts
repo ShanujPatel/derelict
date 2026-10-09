@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import { BOARDS, BOARD_IDS, boardDef, checkRunReport, type RunReport } from '../src/core/hallOfFame';
+import { BOARDS, BOARD_IDS, boardDef, checkRunReport, formatCell, type RunReport } from '../src/core/hallOfFame';
 import SQL from '../docs/supabase.sql?raw';
 import { createLeaderboardClient } from '../src/net/leaderboard';
 
@@ -48,6 +48,18 @@ describe('hall of fame rules', () => {
     expect(boardDef('depth').format(4)).toBe('Depth 4');
     expect(boardDef('banked').format(12345)).toBe('12,345 salvage');
   });
+
+  it('formats table cells', () => {
+    expect(formatCell('banked', 12345)).toBe('12,345');
+    expect(formatCell('mother', 151_000)).toBe('2:31');
+    expect(formatCell('foreman', null)).toBe('—');
+    expect(formatCell('drone', 0)).toBe('—');
+  });
+
+  it('has a table column for every board, in the order the database returns them', () => {
+    const columns = SQL.match(/returns table \(\s*rank bigint, callsign text, is_you boolean,([^)]*)\)/)![1];
+    expect(columns.match(/\w+(?= bigint)/g)).toEqual(BOARD_IDS);
+  });
 });
 
 describe('hall of fame client', () => {
@@ -78,5 +90,21 @@ describe('hall of fame client', () => {
       p_player: PLAYER,
       p_limit: 20,
     });
+  });
+
+  it('reads the RANKS table', async () => {
+    const row = Object.fromEntries(BOARD_IDS.map((id) => [id, 0]));
+    const fetchMock = vi.fn(
+      async () => new Response(JSON.stringify([{ rank: 1, callsign: 'ACE', is_you: true, ...row, banked: 1200, foreman: null }])),
+    );
+    const c = createLeaderboardClient(config, fetchMock);
+    const [r] = await c.hallTable('banked', PLAYER);
+    expect(r).toMatchObject({ rank: 1, callsign: 'ACE', isYou: true });
+    expect(r.values.banked).toBe(1200);
+    expect(r.values.foreman).toBeNull();
+    expect(r.values.drone).toBe(0);
+    const [url, init] = fetchMock.mock.calls[0] as unknown as [string, RequestInit];
+    expect(url).toMatch(/rpc\/get_hall_table$/);
+    expect(JSON.parse(init.body as string)).toEqual({ p_sort: 'banked', p_player: PLAYER, p_limit: 25 });
   });
 });

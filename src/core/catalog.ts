@@ -198,6 +198,13 @@ export const COSMETICS: Record<CharacterId, { body: ColourOption[]; accent: Colo
         colours: { v: '#f1c84b', w: '#fff8d6' },
         trophy: { achievement: 'heavy-hauler', label: 'Extract with 300+ salvage' },
       },
+      {
+        id: 'hollow',
+        name: 'Hollow visor',
+        cost: 0,
+        colours: { v: '#c06bff', w: '#f0d8ff' },
+        trophy: { achievement: 'mutiny', label: 'Beat the Hollow Captain' },
+      },
     ],
   },
   robot: {
@@ -213,6 +220,13 @@ export const COSMETICS: Record<CharacterId, { body: ColourOption[]; accent: Colo
         cost: 0,
         colours: { s: '#5a2a6e', d: '#2f7f6a' },
         trophy: { achievement: 'root-and-branch', label: 'Beat the Bloom Mother' },
+      },
+      {
+        id: 'prospector',
+        name: 'Ore-stained chassis',
+        cost: 0,
+        colours: { s: '#a87a3e', d: '#5a4a3a' },
+        trophy: { achievement: 'prospector', label: 'Earn the Prospector achievement' },
       },
     ],
     accent: [

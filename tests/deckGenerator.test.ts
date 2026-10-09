@@ -169,7 +169,7 @@ describe('generateDeck', () => {
         const stalkers = deck.spawns.filter((s) => s.kind === 'stalker');
         expect(stalkers.length).toBe(ship === 'research' ? DECK_OPTIONS.research.stalkers : 0);
         for (const m of stalkers) expect(bfsDistances(deck.tiles, deck.start)[m.y][m.x]).toBeGreaterThanOrEqual(MIN_ENEMY_DISTANCE);
-        if (ship === 'research') expect(mimics).toHaveLength(0);
+        if (ship !== 'freighter') expect(mimics).toHaveLength(0);
         else expect(mimics.length, seed).toBe(DECK_OPTIONS.freighter.mimics);
         const dist = bfsDistances(deck.tiles, deck.start);
         for (const m of mimics) expect(dist[m.y][m.x]).toBeGreaterThanOrEqual(MIN_ENEMY_DISTANCE);

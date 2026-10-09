@@ -1,5 +1,12 @@
-import { checkSubmission, type BoardEntry, type ScoreSubmission } from '../core/leaderboard';
-import { checkRunReport, type BoardId, type HallEntry, type RunReport } from '../core/hallOfFame';
+import {
+  checkSubmission,
+  checkWeeklySubmission,
+  type BoardEntry,
+  type ScoreSubmission,
+  type WeeklySubmission,
+} from '../core/leaderboard';
+import { GHOST, decodeGhost, type Ghost } from '../core/ghost';
+import { BOARD_IDS, checkRunReport, type BoardId, type HallEntry, type HallRow, type RunReport } from '../core/hallOfFame';
 
 /**
  * Tiny client for the Supabase leaderboard functions in docs/supabase.sql.
@@ -30,7 +37,25 @@ export interface LeaderboardClient {
   submitRun(playerId: string, report: RunReport): Promise<void>;
   /** One all-time board: the top players plus your row. */
   hallOfFame(board: BoardId, playerId: string, limit?: number): Promise<HallEntry[]>;
+  /** The RANKS table: every stat per player, sorted by one column. */
+  hallTable(sort: BoardId, playerId: string, limit?: number): Promise<HallRow[]>;
+  /** Posts a Weekly Challenge run; returns your rank for the week. */
+  submitWeekly(s: WeeklySubmission): Promise<SubmitResult>;
+  weeklyBoard(week: string, playerId: string, limit?: number): Promise<BoardEntry[]>;
+  /** Stores the path of your best daily run, for others to race. */
+  submitGhost(day: string, playerId: string, score: number, durationMs: number, ghost: string): Promise<boolean>;
+  /** The ghost to race today: the best run that has one. */
+  dailyGhost(day: string): Promise<DailyGhost | null>;
 }
+
+export interface DailyGhost {
+  callsign: string;
+  score: number;
+  durationMs: number;
+  ghost: Ghost;
+}
+
+type BoardRow = { rank: number; callsign: string; score: number; kills: number; duration_ms: number; crew: string; is_you: boolean };
 
 export function createLeaderboardClient(
   config: LeaderboardConfig | null,
@@ -109,6 +134,67 @@ export function createLeaderboardClient(
       return (rows ?? []).map((r) => ({ rank: Number(r.rank), callsign: r.callsign, value: Number(r.value), isYou: r.is_you }));
     },
 
+    async hallTable(sort, playerId, limit = 25) {
+      const rows = await call<Record<string, unknown>[]>('get_hall_table', {
+        p_sort: sort,
+        p_player: playerId || null,
+        p_limit: limit,
+      });
+      return (rows ?? []).map((r) => ({
+        rank: Number(r.rank),
+        callsign: String(r.callsign),
+        isYou: r.is_you === true,
+        values: Object.fromEntries(BOARD_IDS.map((id) => [id, r[id] === null || r[id] === undefined ? null : Number(r[id])])) as Record<
+          BoardId,
+          number | null
+        >,
+      }));
+    },
+
+    async submitWeekly(s) {
+      const check = checkWeeklySubmission(s);
+      if (!check.ok) throw new LeaderboardError(check.reason);
+      const rows = await call<{ rank: number; total: number; best: number }[]>('submit_weekly', {
+        p_week: s.week,
+        p_seed: s.seed,
+        p_player: s.playerId,
+        p_callsign: s.callsign,
+        p_ship: s.ship,
+        p_crew: s.character,
+        p_score: s.score,
+        p_kills: s.kills,
+        p_duration_ms: Math.round(s.durationMs),
+      });
+      const row = rows?.[0];
+      if (!row) throw new LeaderboardError('No rank returned');
+      return { rank: Number(row.rank), total: Number(row.total), best: Number(row.best) };
+    },
+
+    async weeklyBoard(week, playerId, limit = 10) {
+      const rows = await call<BoardRow[]>('get_weekly_board', { p_week: week, p_player: playerId || null, p_limit: limit });
+      return (rows ?? []).map(toEntry);
+    },
+
+    async submitGhost(day, playerId, score, durationMs, ghost) {
+      if (ghost.length > GHOST.maxLength) return false;
+      const ok = await call<boolean>('submit_ghost', {
+        p_day: day,
+        p_player: playerId,
+        p_score: score,
+        p_duration_ms: Math.round(durationMs),
+        p_ghost: ghost,
+      });
+      return ok === true;
+    },
+
+    async dailyGhost(day) {
+      const rows = await call<{ callsign: string; score: number; duration_ms: number; ghost: string }[]>('get_daily_ghost', { p_day: day });
+      const row = rows?.[0];
+      const ghost = decodeGhost(row?.ghost);
+      if (!row || !ghost) return null;
+      return { callsign: row.callsign, score: Number(row.score), durationMs: Number(row.duration_ms), ghost };
+    },
+
     async claimName(playerId, name) {
       const result = await call<boolean>('claim_callsign', { p_player: playerId, p_callsign: name });
       return result === true;
@@ -128,6 +214,18 @@ export function createLeaderboardClient(
         isYou: r.is_you,
       }));
     },
+  };
+}
+
+function toEntry(r: BoardRow): BoardEntry {
+  return {
+    rank: Number(r.rank),
+    callsign: r.callsign,
+    score: Number(r.score),
+    kills: Number(r.kills),
+    durationMs: Number(r.duration_ms),
+    character: r.crew,
+    isYou: r.is_you,
   };
 }
 

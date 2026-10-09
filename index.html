@@ -13,6 +13,8 @@
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
     <title>Derelict</title>
     <link rel="icon" type="image/svg+xml" href="./favicon.svg" />
+    <link rel="apple-touch-icon" href="./apple-touch-icon.png" />
+    <link rel="manifest" href="./manifest.webmanifest" />
     <style>
       html, body {
         margin: 0;
@@ -27,10 +29,28 @@
       }
       #game { width: 100vw; height: 100vh; height: 100dvh; }
       canvas { image-rendering: pixelated; display: block; }
+      /* Shown straight away while the game downloads; removed when it starts. */
+      #splash {
+        position: fixed; inset: 0; z-index: 20;
+        display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 14px;
+        background: #05070c; color: #7f8fb3;
+        font: 11px ui-monospace, Menlo, Consolas, monospace; letter-spacing: 0.2em;
+        transition: opacity 0.3s;
+      }
+      #splash b { color: #ffd166; font-size: 26px; font-weight: 400; letter-spacing: 0.35em; }
+      #splash i { display: block; width: 160px; height: 3px; background: #1b2333; overflow: hidden; position: relative; }
+      #splash i::after {
+        content: ''; position: absolute; inset: 0; width: 40%; background: #6fd6ff;
+        animation: splash-bar 1.1s ease-in-out infinite;
+      }
+      #splash.gone { opacity: 0; pointer-events: none; }
+      @keyframes splash-bar { from { transform: translateX(-100%); } to { transform: translateX(250%); } }
     </style>
   </head>
   <body>
+    <div id="splash" aria-live="polite"><b>DERELICT</b><i></i><span>POWERING UP</span></div>
     <div id="game"></div>
+    <noscript><p style="color:#d7e3ff;font-family:monospace;text-align:center">Derelict needs JavaScript to run.</p></noscript>
     <script type="module" src="/src/main.ts"></script>
   </body>
 </html>

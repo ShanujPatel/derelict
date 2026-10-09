@@ -30,7 +30,7 @@ beforeAll(async () => {
 }, 60_000);
 
 beforeEach(async () => {
-  await db.exec('reset role; delete from daily_scores; delete from players; delete from player_totals;');
+  await db.exec('reset role; delete from daily_scores; delete from players; delete from player_totals; delete from weekly_scores;');
   await db.exec('set role anon');
 });
 
@@ -229,12 +229,117 @@ describe('supabase.sql', () => {
       await expect(db.query('select * from player_totals')).rejects.toThrow(/permission denied/);
     });
 
+    it('returns every stat in one table, sorted by the column you pick', async () => {
+      const table = async (sort: string | null, player = P1) =>
+        (await db.query<Record<string, unknown>>('select * from get_hall_table($1, $2, $3)', [sort, player, 25])).rows;
+      await claim(P1, 'NOVA');
+      await claim(P2, 'ACE');
+      await run(P1);
+      await run(P1, { salvage: 300, kills: { crawler: 7 } });
+      await run(P2, { salvage: 450, kills: { drone: 1 }, boss: 'foreman', bossMs: 80_000 });
+      // Default sort: total salvage banked.
+      const byBanked = await table(null);
+      expect(byBanked.map((r) => [Number(r.rank), r.callsign, Number(r.banked), r.is_you])).toEqual([
+        [1, 'NOVA', 500, true],
+        [2, 'ACE', 450, false],
+      ]);
+      expect(byBanked[0]).toMatchObject({ extractions: 2, kills: 12, crawler: 7, drone: 4, foreman: null });
+      expect(byBanked[1]).toMatchObject({ haul: 450, foreman: 80_000, kills: 1 });
+      expect((await table('haul')).map((r) => r.callsign)).toEqual(['ACE', 'NOVA']);
+      // Only players with something in the sort column are ranked.
+      expect((await table('foreman')).map((r) => [Number(r.rank), r.callsign])).toEqual([[1, 'ACE']]);
+      expect(await table('mother')).toEqual([]);
+      await expect(table('lol')).rejects.toThrow('unknown board');
+    });
+
     it('caps runs per day', async () => {
       await claim(P1, 'NOVA');
       await db.exec('reset role');
       await db.query(`insert into player_totals (player_id, day, runs_today) values ($1, (now() at time zone 'utc')::date, 200)`, [P1]);
       await db.exec('set role anon');
       await expect(run(P1)).rejects.toThrow('too many runs');
+    });
+  });
+
+  describe('v1.0', () => {
+    const isoWeek = (d: Date) => {
+      const t = new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate()));
+      t.setUTCDate(t.getUTCDate() + 4 - (t.getUTCDay() || 7));
+      const start = new Date(Date.UTC(t.getUTCFullYear(), 0, 1));
+      const n = Math.ceil(((t.getTime() - start.getTime()) / 86400000 + 1) / 7);
+      return `${t.getUTCFullYear()}-W${String(n).padStart(2, '0')}`;
+    };
+    const week = isoWeek(new Date());
+    const weekly = (player: string, name: string, score: number, ms = 200_000, w = week, ship = 'mining') =>
+      db.query<{ rank: number; total: number; best: number }>('select * from submit_weekly($1, $2, $3, $4, $5, $6, $7, $8, $9)', [
+        w,
+        `weekly-${w}`,
+        player,
+        name,
+        ship,
+        'salvager',
+        score,
+        4,
+        ms,
+      ]);
+
+    it('accepts mining haulers on the daily board', async () => {
+      await db.query('select * from submit_score($1, $2, $3, $4, $5, $6, $7, $8, $9)', [
+        today, `daily-${today}`, P1, 'nova', 'mining', 'salvager', 150, 3, 120_000,
+      ]);
+      await expect(
+        db.query('select * from submit_score($1, $2, $3, $4, $5, $6, $7, $8, $9)', [today, `daily-${today}`, P2, 'ace', 'yacht', 'salvager', 150, 3, 120_000]),
+      ).rejects.toThrow(/check/);
+    });
+
+    it('ranks the weekly board and keeps each best', async () => {
+      await weekly(P1, 'nova', 400);
+      await weekly(P2, 'ace', 600);
+      const again = (await weekly(P1, 'nova', 300)).rows[0];
+      expect(again.best).toBe(400);
+      const board = await db.query<{ rank: number; callsign: string; score: number; is_you: boolean }>('select * from get_weekly_board($1, $2, 10)', [week, P1]);
+      expect(board.rows.map((r) => [Number(r.rank), r.callsign, r.score, r.is_you])).toEqual([
+        [1, 'ACE', 600, false],
+        [2, 'NOVA', 400, true],
+      ]);
+    });
+
+    it('rejects weekly runs for other weeks, wrong seeds and impossible scores', async () => {
+      await expect(weekly(P1, 'nova', 100, 200_000, '2020-W01')).rejects.toThrow('week is not open');
+      await expect(
+        db.query('select * from submit_weekly($1, $2, $3, $4, $5, $6, $7, $8, $9)', [week, 'weekly-nope', P1, 'nova', 'mining', 'salvager', 10, 1, 60_000]),
+      ).rejects.toThrow('not a weekly seed');
+      await expect(weekly(P1, 'nova', 2000, 30_000)).rejects.toThrow(/too fast|check/);
+      await expect(db.query('select * from weekly_scores')).rejects.toThrow(/permission denied/);
+    });
+
+    it('stores a ghost for your best daily run and serves the leader', async () => {
+      await submit({ player: P1, callsign: 'nova', score: 300, durationMs: 200_000 });
+      await submit({ player: P2, callsign: 'ace', score: 200, durationMs: 150_000 });
+      const g1 = 'G1.100.AAAAAAEB';
+      // Wrong score: not your board run, so it's ignored.
+      const wrong = await db.query<{ submit_ghost: boolean }>('select submit_ghost($1, $2, $3, $4, $5)', [today, P1, 250, 200_000, g1]);
+      expect(wrong.rows[0].submit_ghost).toBe(false);
+      const ok = await db.query<{ submit_ghost: boolean }>('select submit_ghost($1, $2, $3, $4, $5)', [today, P2, 200, 150_000, g1]);
+      expect(ok.rows[0].submit_ghost).toBe(true);
+      let ghost = await db.query<{ callsign: string; ghost: string }>('select * from get_daily_ghost($1)', [today]);
+      // The leader has no ghost yet, so the best run that has one is served.
+      expect(ghost.rows[0]).toMatchObject({ callsign: 'ACE', ghost: g1 });
+      await db.query('select submit_ghost($1, $2, $3, $4, $5)', [today, P1, 300, 200_000, 'G1.100.AAAAAAAA']);
+      ghost = await db.query<{ callsign: string; ghost: string }>('select * from get_daily_ghost($1)', [today]);
+      expect(ghost.rows[0].callsign).toBe('NOVA');
+      await expect(db.query('select submit_ghost($1, $2, $3, $4, $5)', [today, P1, 300, 200_000, 'drop table'])).rejects.toThrow('invalid ghost');
+      await expect(db.query('select submit_ghost($1, $2, $3, $4, $5)', [today, P1, 300, 200_000, `G1.100.${'A'.repeat(30000)}`])).rejects.toThrow('invalid ghost');
+    });
+
+    it('counts sappers, sweepers and the Hollow Captain in the hall of fame', async () => {
+      await db.query('select claim_callsign($1, $2)', [P1, 'NOVA']);
+      await db.query('select submit_run($1, $2)', [
+        P1,
+        JSON.stringify({ extracted: true, salvage: 200, durationMs: 180_000, depth: 1, kills: { sapper: 3, sweeper: 2 }, elites: 0, bounties: 0, boss: 'captain', bossMs: 95_000 }),
+      ]);
+      const rows = (await db.query<Record<string, unknown>>('select * from get_hall_table($1, $2, 25)', ['captain', P1])).rows;
+      expect(rows[0]).toMatchObject({ callsign: 'NOVA', sapper: 3, sweeper: 2, captain: 95_000, kills: 5 });
     });
   });
 });

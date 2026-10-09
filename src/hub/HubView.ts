@@ -12,17 +12,18 @@ import {
   type StatId,
   type ToolId,
 } from '../core/catalog';
-import { CHAPTERS, CODEX, chapterProgress } from '../core/codex';
+import { CHAPTERS, CODEX, MINING_UNLOCK_EXTRACTIONS, chapterProgress } from '../core/codex';
 import { dailySeed, dailyShip } from '../core/seed';
 import { dayFromDailySeed, formatDuration, type BoardEntry } from '../core/leaderboard';
 import { leaderboard } from '../net/leaderboard';
-import { BOARDS, boardDef, type BoardGroup, type BoardId, type HallEntry } from '../core/hallOfFame';
+import { BOARDS, boardDef, fastestFirst, formatCell, type BoardGroup, type BoardId, type HallRow } from '../core/hallOfFame';
 import { vesselName } from '../core/names';
 import { ACHIEVEMENTS } from '../core/achievements';
 import { conditionFor } from '../core/conditions';
 import { isoWeek, weeklySeed, weeklySetup } from '../core/weekly';
 import { manualSection } from './manual';
 import { BOSSES, BOSS_IDS, BOSS_UNLOCK_EXTRACTIONS, type BossId } from '../core/bosses';
+import { baseSeed } from '../core/depth';
 import { chooseName, ensureName, rollName, type NameResult } from '../net/names';
 import type { ShipType } from '../core/types';
 import {
@@ -61,6 +62,13 @@ const esc = (t: string) => t.replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&l
 
 type Tab = 'crew' | 'loadout' | 'upgrades' | 'daily' | 'ranks' | 'log';
 
+/** How each ship type is named and described in the hub. */
+const SHIP_LABEL: Record<ShipType, { short: string; long: string; icon: string; threat: string }> = {
+  freighter: { short: 'FREIGHTER', long: 'Freighter', icon: '⛭', threat: 'Guarded by drones and turrets.' },
+  research: { short: 'RESEARCH', long: 'Research vessel', icon: '☣', threat: 'Overrun by the Bloom.' },
+  mining: { short: 'MINING', long: 'Mining hauler', icon: '⛏', threat: 'Sapper mines and sweeping cutting lasers.' },
+};
+
 const TABS: { id: Tab; label: string }[] = [
   { id: 'crew', label: 'CREW' },
   { id: 'loadout', label: 'LOADOUT' },
@@ -98,10 +106,18 @@ export class HubView {
     error: null,
   };
   /** All-time boards, each cached for a minute. */
-  private hall: { board: BoardId; cache: Partial<Record<BoardId, { at: number; entries: HallEntry[] | null; error: string | null }>>; loading: BoardId | null } = {
+  private hall: { board: BoardId; cache: Partial<Record<BoardId, { at: number; rows: HallRow[] | null; error: string | null }>>; loading: BoardId | null } = {
     board: 'banked',
     cache: {},
     loading: null,
+  };
+  private hallScroll = 0;
+  private weeklyBoard: { week: string; at: number; loading: boolean; entries: BoardEntry[] | null; error: string | null } = {
+    week: '',
+    at: 0,
+    loading: false,
+    entries: null,
+    error: null,
   };
   private exportCode = '';
   private naming = false;
@@ -231,7 +247,14 @@ export class HubView {
         return this.update(setTool(this.save, d.id as ToolId));
       case 'destination': {
         const ship = d.ship as ShipType;
-        if (!canBoard(this.save, ship)) return this.toast('Find more crew logs to locate research vessels', true);
+        if (!canBoard(this.save, ship)) {
+          return this.toast(
+            ship === 'mining'
+              ? `Find the Gravecutter ledger log, or extract ${Math.max(0, MINING_UNLOCK_EXTRACTIONS - this.save.stats.extractions)} more times, to locate mining haulers`
+              : 'Find more crew logs to locate research vessels',
+            true,
+          );
+        }
         return this.update(setDestination(this.save, ship));
       }
       case 'callsign': {
@@ -243,7 +266,7 @@ export class HubView {
       case 'refresh-board':
         this.board.at = 0;
         return this.render();
-      case 'hall-board':
+      case 'hall-sort':
         this.hall.board = d.board as BoardId;
         return this.render();
       case 'refresh-hall':
@@ -363,7 +386,12 @@ export class HubView {
       ranks: () => this.ranksTab(),
       log: () => this.logTab(),
     };
+    // Keep the RANKS table's sideways scroll when it re-sorts or refreshes.
+    const shown = this.body.querySelector('.hall-scroll');
+    if (shown) this.hallScroll = shown.scrollLeft;
     this.body.innerHTML = views[this.tab]();
+    const table = this.body.querySelector('.hall-scroll');
+    if (table) table.scrollLeft = this.hallScroll;
     this.renderLaunchBar();
 
     const canvas = this.body.querySelector<HTMLCanvasElement>('canvas[data-preview]');
@@ -381,7 +409,7 @@ export class HubView {
         aria-checked="${dest === ship}">${locked ? '🔒 ' : ''}${label}</button>`;
     };
     this.root.querySelector('[data-dest]')!.innerHTML =
-      option('freighter', 'FREIGHTER') + option('research', 'RESEARCH');
+      option('freighter', 'FREIGHTER') + option('research', 'RESEARCH') + option('mining', 'MINING');
     const mission = this.dailyMission();
     const daily = this.root.querySelector<HTMLElement>('.hub-launch [data-action="daily"]')!;
     daily.className = `btn daily theme-${mission.ship} ${mission.best === null ? 'fresh' : 'played'}`;
@@ -400,9 +428,9 @@ export class HubView {
     return {
       ship,
       vessel: vesselName(seed, ship),
-      label: ship === 'research' ? 'RESEARCH' : 'FREIGHTER',
-      icon: ship === 'research' ? '☣' : '⛭',
-      threat: ship === 'research' ? 'Overrun by the Bloom.' : 'Guarded by drones and turrets.',
+      label: SHIP_LABEL[ship].short,
+      icon: SHIP_LABEL[ship].icon,
+      threat: SHIP_LABEL[ship].threat,
       condition: conditionFor(seed, ship),
       best: this.save.daily.day === day ? this.save.daily.best : null,
     };
@@ -607,7 +635,7 @@ export class HubView {
     this.loadBoard();
     const day = this.today();
     const mission = this.dailyMission();
-    const ship = mission.ship === 'research' ? 'Research vessel' : 'Freighter';
+    const ship = SHIP_LABEL[mission.ship].long;
     const date = new Date(`${day}T12:00:00Z`).toLocaleDateString('en-GB', { weekday: 'short', day: 'numeric', month: 'short' });
     const best = this.save.daily.day === day ? this.save.daily.best : null;
 
@@ -646,7 +674,9 @@ export class HubView {
           const n = liveStreak(this.save, day);
           return n ? ` <span class="streak">🔥 ${n}-day streak${this.save.streak.best > n ? ` · best ${this.save.streak.best}` : ''}</span>` : '';
         })()}</div>
-        <p class="hub-note">Extract once a day to build a streak: +10 salvage per day in a row (up to +70).</p>
+        <p class="hub-note">Extract once a day to build a streak: +10 salvage per day in a row (up to +70).${
+          this.save.settings.ghost ? " You'll race a see-through ghost of the day's best run (switch it off in LOG → Settings)." : ''
+        }</p>
         <div class="btn-row"><button class="btn daily-play theme-${mission.ship}" data-action="daily">BOARD ${mission.vessel} ▸</button></div>
       </section>
       ${this.weeklySection()}
@@ -662,75 +692,116 @@ export class HubView {
     if (!leaderboard.enabled || this.hall.loading === id || (cached && Date.now() - cached.at < 60_000)) return;
     this.hall.loading = id;
     leaderboard
-      .hallOfFame(id, this.save.playerId)
-      .then((entries) => (this.hall.cache[id] = { at: Date.now(), entries, error: null }))
-      .catch((e: Error) => (this.hall.cache[id] = { at: Date.now(), entries: null, error: e.message }))
+      .hallTable(id, this.save.playerId)
+      .then((rows) => (this.hall.cache[id] = { at: Date.now(), rows, error: null }))
+      .catch((e: Error) => (this.hall.cache[id] = { at: Date.now(), rows: null, error: e.message }))
       .finally(() => {
         if (this.hall.loading === id) this.hall.loading = null;
         if (this.tab === 'ranks') this.render();
       });
   }
 
-  /** RANKS: the all-time hall of fame. Salvage, records, boss times and kills by hostile type. */
+  /**
+   * RANKS: the all-time hall of fame as one table, a row per player and a
+   * column per stat. Sorted by total salvage banked; tap a heading to re-sort.
+   */
   private ranksTab(): string {
     if (!leaderboard.enabled) {
       return `<section class="hub-section"><h3>Hall of fame · all time</h3>
         <p class="hub-note">The online leaderboard isn't switched on for this build, so there are no all-time rankings. Your own records are under <button class="text-link" data-tab="log">LOG</button>.</p></section>`;
     }
     this.loadHall();
-    const current = boardDef(this.hall.board);
+    const sort = boardDef(this.hall.board);
+    const cached = this.hall.cache[sort.id];
     const groups: BoardGroup[] = ['Salvage', 'Records', 'Bosses', 'Kills'];
-    const picker = groups
-      .map(
-        (g) => `<div class="hall-group"><span class="hall-group-name">${g}</span><div class="hall-chips">${BOARDS.filter((b) => b.group === g)
-          .map(
-            (b) =>
-              `<button class="chip" data-action="hall-board" data-board="${b.id}" aria-pressed="${b.id === current.id}">${esc(b.label)}</button>`,
-          )
-          .join('')}</div></div>`,
-      )
+    const groupRow = groups
+      .map((g) => `<th colspan="${BOARDS.filter((b) => b.group === g).length}" class="g-${g.toLowerCase()}">${g}</th>`)
       .join('');
-    const cached = this.hall.cache[current.id];
-    let list: string;
+    const heads = BOARDS.map((b) => {
+      const on = b.id === sort.id;
+      const arrow = on ? (fastestFirst(b.id) ? ' ▲' : ' ▼') : '';
+      return `<th class="num ${on ? 'sorted' : ''}" aria-sort="${on ? (fastestFirst(b.id) ? 'ascending' : 'descending') : 'none'}">
+        <button data-action="hall-sort" data-board="${b.id}" title="${esc(b.label)}">${esc(b.short)}${arrow}</button></th>`;
+    }).join('');
+
+    let body: string;
     if (cached?.error) {
-      list = `<p class="hub-note">Couldn't load the hall of fame: ${esc(cached.error)}</p>`;
-    } else if (!cached?.entries) {
-      list = '<p class="hub-note">Loading…</p>';
-    } else if (cached.entries.length === 0) {
-      list = '<p class="hub-note">Nobody on this board yet. It could be you.</p>';
+      body = `<p class="hub-note">Couldn't load the hall of fame: ${esc(cached.error)}</p>`;
+    } else if (!cached?.rows) {
+      body = '<p class="hub-note">Loading…</p>';
     } else {
-      list = `<ol class="board hall">${cached.entries
+      const rows = cached.rows
         .map(
-          (r) => `<li class="${r.isYou ? 'you' : ''} ${r.rank <= 3 ? 'top' : ''}">
-            <span class="b-rank">${r.rank}</span>
-            <span class="b-name">${esc(r.callsign)}${r.isYou ? ' <small>YOU</small>' : ''}</span>
-            <span class="b-score">${esc(current.format(Number(r.value)))}</span>
-          </li>`,
+          (r) => `<tr class="${r.isYou ? 'you' : ''} ${r.rank <= 3 ? 'top' : ''}">
+            <td class="h-rank">${r.rank}</td>
+            <td class="h-name">${esc(r.callsign)}${r.isYou ? ' <small>YOU</small>' : ''}</td>
+            ${BOARDS.map((b) => `<td class="num ${b.id === sort.id ? 'sorted' : ''}">${formatCell(b.id, r.values[b.id])}</td>`).join('')}
+          </tr>`,
         )
-        .join('')}</ol>`;
+        .join('');
+      const empty = cached.rows.length
+        ? ''
+        : `<p class="hub-note">Nobody has a ${esc(sort.label.toLowerCase())} yet. It could be you.</p>`;
+      body = `<div class="hall-scroll"><table class="hall-table">
+          <thead><tr><th class="h-rank" rowspan="2">#</th><th class="h-name" rowspan="2">Salvager</th>${groupRow}</tr><tr>${heads}</tr></thead>
+          <tbody>${rows}</tbody>
+        </table></div>${empty}`;
     }
     return `<section class="hub-section"><h3>Hall of fame · all time</h3>
-      <div class="hall-picker">${picker}</div>
-      <div class="hall-title">${esc(current.label)}</div>
-      ${list}
-      <div class="btn-row"><button class="btn ghost" data-action="refresh-hall">REFRESH</button></div>
+      <div class="hall-title">Sorted by ${esc(sort.label.toLowerCase())}${sort.id === 'bounty' ? ' claimed' : sort.group === 'Kills' ? ' destroyed' : ''}${fastestFirst(sort.id) ? ' (fastest first)' : ''}</div>
+      <p class="hub-note hall-hint">Tap a column heading to sort by it. Scroll sideways for boss times and kills by hostile type.</p>
+      ${body}
+      <div class="btn-row">${sort.id !== 'banked' ? '<button class="btn ghost" data-action="hall-sort" data-board="banked">SORT BY SALVAGE</button>' : ''}<button class="btn ghost" data-action="refresh-hall">REFRESH</button></div>
       <p class="hub-note">Every run you finish adds to your totals once your name is claimed (assist mode runs don't count). Lost runs still count kills; salvage only counts when you extract.</p>
     </section>
     <p class="hub-note">Ranked as <b>${esc(this.save.callsign)}</b>. Change your name in <button class="text-link" data-tab="crew">CREW</button>. Today's board is under <button class="text-link" data-tab="daily">DAILY</button>.</p>`;
   }
 
-  /** This week's challenge: ship, mutators, your best. */
+  /** Fetches this week's board at most every 30 s. */
+  private loadWeeklyBoard(week: string) {
+    const b = this.weeklyBoard;
+    if (!leaderboard.enabled || b.loading || (b.week === week && Date.now() - b.at < 30_000)) return;
+    this.weeklyBoard = { ...b, week, loading: true, error: null };
+    leaderboard
+      .weeklyBoard(week, this.save.playerId, 5)
+      .then((entries) => (this.weeklyBoard = { week, at: Date.now(), loading: false, entries, error: null }))
+      .catch((e: Error) => (this.weeklyBoard = { week, at: Date.now(), loading: false, entries: null, error: e.message }))
+      .finally(() => this.tab === 'daily' && this.render());
+  }
+
+  private weeklyBoardHtml(): string {
+    if (!leaderboard.enabled) return '';
+    const b = this.weeklyBoard;
+    if (b.error) return `<p class="hub-note">Couldn't load the weekly board: ${esc(b.error)}</p>`;
+    if (!b.entries) return '<p class="hub-note">Loading the weekly board…</p>';
+    if (!b.entries.length) return '<p class="hub-note">Nobody has extracted this week yet. Top spot is open.</p>';
+    return `<ol class="board weekly-board">${b.entries
+      .map(
+        (r) => `<li class="${r.isYou ? 'you' : ''}">
+          <span class="b-rank">${r.rank}</span>
+          <span class="b-name">${esc(r.callsign)}${r.isYou ? ' <small>YOU</small>' : ''}</span>
+          <span class="b-score">${r.score}</span>
+          <span class="b-time">${formatDuration(r.durationMs)}</span>
+          <span class="b-crew">${r.character === 'robot' ? '⚙' : '◉'}</span>
+        </li>`,
+      )
+      .join('')}</ol>`;
+  }
+
+  /** This week's challenge: ship, mutators, your best, and the week's board. */
   private weeklySection(): string {
     const seed = weeklySeed(new Date());
     const week = isoWeek(new Date());
+    this.loadWeeklyBoard(week);
     const { ship, mutators } = weeklySetup(seed);
     const best = this.save.weekly.week === week ? this.save.weekly.best : null;
     return `<section class="hub-section"><h3>Weekly challenge · ${week}</h3>
       <article class="card weekly-card">
-        <div class="daily-head"><span>${vesselName(seed, ship)}</span><b>${ship === 'research' ? '☣ RESEARCH VESSEL' : '⛭ FREIGHTER'}</b></div>
+        <div class="daily-head"><span>${vesselName(seed, ship)}</span><b>${SHIP_LABEL[ship].icon} ${SHIP_LABEL[ship].long.toUpperCase()}</b></div>
         <ul class="mutators">${mutators.map((m) => `<li><b>${m.name.toUpperCase()}</b> ${m.blurb}</li>`).join('')}</ul>
         <div class="daily-best">Your best this week <b>${best ?? '—'}</b></div>
         <div class="btn-row"><button class="btn weekly-play" data-action="weekly">PLAY THE WEEKLY ▸</button></div>
+        ${leaderboard.enabled ? `<h4 class="weekly-board-title">Top this week</h4>${this.weeklyBoardHtml()}` : ''}
       </article>
     </section>`;
   }
@@ -738,7 +809,9 @@ export class HubView {
   private bossLockReason(id: BossId): string {
     const left = BOSS_UNLOCK_EXTRACTIONS - this.save.stats.extractions;
     if (left > 0) return `Extract ${left} more time${left === 1 ? '' : 's'} to take boss contracts`;
-    return BOSSES[id].ship === 'research' ? 'Find the coordinates log to reach research vessels first' : 'Locked';
+    if (BOSSES[id].ship === 'research') return 'Find the coordinates log to reach research vessels first';
+    if (BOSSES[id].ship === 'mining') return 'Locate the mining haulers first';
+    return 'Locked';
   }
 
   /** Boss contracts: one card per boss, with how to beat it and your record. */
@@ -769,7 +842,7 @@ export class HubView {
         <span>${label}</span>
         <input type="range" min="0" max="100" step="5" value="${Math.round(st[key] * 100)}" data-setting="${key}" aria-label="${label} volume" />
       </label>`;
-    const toggle = (key: 'screenShake' | 'flashes' | 'minimap' | 'assist' | 'tips', label: string) => `
+    const toggle = (key: 'screenShake' | 'flashes' | 'minimap' | 'assist' | 'tips' | 'ghost', label: string) => `
       <label class="setting toggle">
         <span>${label}</span>
         <input type="checkbox" ${st[key] ? 'checked' : ''} data-setting="${key}" />
@@ -788,9 +861,10 @@ export class HubView {
       <div class="card settings">
         ${toggle('tips', 'First-time tips')}
         ${toggle('minimap', 'Corner minimap')}
+        ${toggle('ghost', 'Daily ghost to race')}
         ${toggle('assist', 'Assist mode')}
         <div class="btn-row"><button class="btn ghost" data-action="reset-tips">SHOW TIPS AGAIN (${this.save.tips.length} SEEN)</button></div>
-        <p class="hub-note">Assist mode gives you 50% more oxygen or battery and halves the damage you take. Daily runs played with it on aren't posted to the leaderboard. Turn off screen shake and damage flashes above if motion bothers you.</p>
+        <p class="hub-note">Assist mode gives you 50% more oxygen or battery and halves the damage you take. Daily runs played with it on aren't posted to the leaderboard. Turn off screen shake and damage flashes above if motion bothers you. The daily ghost is a see-through replay of the day's best run.</p>
       </div>
     </section>`;
   }
@@ -864,20 +938,23 @@ export class HubView {
           ? BOSSES[r.boss].name.replace('THE ', '')
           : r.mode === 'daily'
             ? 'DAILY'
-            : r.ship === 'research'
-              ? 'RESEARCH'
-              : 'FREIGHTER';
+            : r.mode === 'weekly'
+              ? 'WEEKLY'
+              : SHIP_LABEL[r.ship].short;
+        // Ordinary ships open in the seed explorer.
+        const map = r.boss ? null : `./map.html?seed=${encodeURIComponent(baseSeed(r.seed))}${r.ship === 'freighter' ? '' : `&ship=${r.ship}`}`;
         const result = r.extracted ? `+${r.salvage}` : r.abandoned ? 'ABANDONED' : 'LOST';
         return `<li class="${r.extracted ? 'ok' : 'lost'}">
           <span class="h-when">${when}</span>
-          <span class="h-what">${what}${r.character === 'robot' ? ' ⚙' : ''}</span>
+          <span class="h-what">${map ? `<a href="${map}" target="_blank" rel="noopener" title="Open this ship in the seed explorer">${what}</a>` : what}${r.character === 'robot' ? ' ⚙' : ''}</span>
           <span class="h-time">${formatDuration(r.durationMs)}</span>
           <span class="h-kills">${r.kills}✕</span>
           <b class="h-result">${result}</b>
         </li>`;
       })
       .join('');
-    return `<section class="hub-section"><h3>Recent runs</h3><ol class="history">${rows}</ol></section>`;
+    return `<section class="hub-section"><h3>Recent runs</h3><ol class="history">${rows}</ol>
+      <p class="hub-note">Tap a ship to see its whole layout in the <a href="./map.html" target="_blank" rel="noopener">seed explorer</a>.</p></section>`;
   }
 
   private achievementsSection(): string {
@@ -908,7 +985,7 @@ export class HubView {
           ${stat(st.elitesKilled, 'ELITES DOWN')}
           ${stat(st.drumsDetonated, 'DRUMS BLOWN')}
           ${stat(st.dodges, 'ROLLS')}
-          ${stat(this.save.bosses.foreman.kills + this.save.bosses.mother.kills, 'BOSSES BEATEN')}
+          ${stat(BOSS_IDS.reduce((n, id) => n + this.save.bosses[id].kills, 0), 'BOSSES BEATEN')}
           <div class="stat"><b>${formatHours(st.timeAboardMs)}</b><span>TIME ABOARD</span></div>
           ${stat(st.extractions && st.runs ? Math.round((st.extractions / st.runs) * 100) : 0, 'EXTRACT %')}
         </div>

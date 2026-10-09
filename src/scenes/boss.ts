@@ -1,9 +1,11 @@
 import Phaser from 'phaser';
 import {
   BOSSES,
+  CAPTAIN,
   FOREMAN,
   MOTHER,
   bossPhase,
+  captainDamage,
   fanAngles,
   foremanDamage,
   motherDamage,
@@ -510,6 +512,299 @@ export class MotherFight extends BossFight {
 
   protected die() {
     this.tethers.clear();
+    super.die();
+  }
+}
+
+// ---------------------------------------------------------------- the Hollow Captain
+
+interface Grenade {
+  sprite: Phaser.GameObjects.Image;
+  marker: Phaser.GameObjects.Graphics;
+  tween: Phaser.Tweens.Tween | null;
+  /** Thrown back at him with the grav tool. */
+  returned: boolean;
+  /** Landed and ticking: goes off at this time. */
+  fuseAt: number | null;
+}
+
+export class CaptainFight extends BossFight {
+  private shieldDownUntil = 0;
+  private nextBurst = 0;
+  private nextGrenade = 0;
+  private nextBlink = 0;
+  private nextRaider = 0;
+  private side = 1;
+  private nextSideFlip = 0;
+  private raiders: Sprite[] = [];
+  private grenades: Grenade[] = [];
+  private shieldGfx: Phaser.GameObjects.Graphics;
+
+  constructor(
+    host: BossHost,
+    x: number,
+    y: number,
+    parts: Part[],
+    /** Open floor spots in the arena he can blink to and call raiders in at. */
+    private spots: Point[],
+  ) {
+    super(host, 'captain', x, y, 'captain', parts);
+    this.sprite.setCircle(12, 4, 3).setCollideWorldBounds(true).setPushable(false);
+    this.shieldGfx = host.add.graphics().setDepth(11);
+  }
+
+  get radius() {
+    return 14;
+  }
+
+  /** The shield is up while any pylon still stands. */
+  get shielded() {
+    return this.livingParts().length > 0;
+  }
+
+  wake(time: number) {
+    super.wake(time);
+    this.nextBurst = time + 1400;
+    this.nextGrenade = time + 3200;
+  }
+
+  status(): BossStatus {
+    const pylons = this.livingParts().length;
+    const left = Math.max(0, Math.ceil((this.shieldDownUntil - this.host.time.now) / 1000));
+    const state = this.shielded ? `SHIELDED · ${pylons} PYLON${pylons === 1 ? '' : 'S'}` : `SHIELD DOWN: OPEN FIRE · ${left}s`;
+    return { name: this.def.name, hp: this.hp, max: this.def.hp, state, vulnerable: !this.shielded };
+  }
+
+  hit(amount: number, _pierce: boolean, x: number, y: number): number {
+    const done = captainDamage(amount, { shielded: this.shielded });
+    if (done > 0) this.damage(done, x, y);
+    else this.armourPing(x, y, 'SHIELDED');
+    return done;
+  }
+
+  blast() {
+    if (this.dead) return;
+    this.damage(CAPTAIN.blastDamage, this.sprite.x, this.sprite.y);
+    this.host.floatText(this.sprite.x, this.sprite.y - 22, 'BLAST', '#ff9a3c');
+  }
+
+  partDestroyed() {
+    const left = this.livingParts().length;
+    if (left > 0) {
+      this.host.floatText(this.sprite.x, this.sprite.y - 24, `PYLON DOWN · ${left} LEFT`, '#c06bff');
+      return;
+    }
+    this.shieldDownUntil = this.host.time.now + CAPTAIN.shieldDownMs;
+    this.sprite.setTexture('captain-exposed');
+    this.host.showBanner('SHIELD DOWN', 'Open fire before the pylons reboot', 0x3dff9a);
+    this.host.sfx('bossArmour', this.sprite.x, this.sprite.y);
+  }
+
+  touchPlayer() {
+    if (this.dead || !this.awake) return;
+    this.host.hurtPlayer(CAPTAIN.contactDamage, this.sprite);
+  }
+
+  /**
+   * The grav tool caught some of his grenades: they fly back and land on him.
+   * Returns how many were thrown back.
+   */
+  deflect(inCone: (x: number, y: number) => boolean): number {
+    let n = 0;
+    for (const g of this.grenades) {
+      if (g.returned || !g.sprite.active || !inCone(g.sprite.x, g.sprite.y)) continue;
+      n++;
+      g.returned = true;
+      g.fuseAt = null;
+      g.tween?.stop();
+      g.marker.clear();
+      g.sprite.setTint(0x9ff6ff);
+      this.flyGrenade(g, this.sprite.x, this.sprite.y, 420);
+    }
+    if (n) this.host.floatText(this.host.player.x, this.host.player.y - 16, n > 1 ? `RETURNED ×${n}` : 'RETURNED', '#5ef2ff');
+    return n;
+  }
+
+  protected restoreTint() {
+    this.sprite.clearTint();
+    if (this.phase2) this.sprite.setTint(0xffc0d0);
+  }
+
+  protected enterPhase2() {
+    super.enterPhase2();
+    this.sprite.setTint(0xffc0d0);
+    this.host.showBanner('ALL HANDS', 'The Captain is blinking and calling raiders', 0xff5a6a);
+    this.nextBlink = this.host.time.now + 2500;
+    this.nextRaider = this.host.time.now + 1500;
+  }
+
+  protected tick(time: number) {
+    const p = this.phase2 ? 1 : 0;
+    const s = this.sprite;
+    this.raiders = this.raiders.filter((r) => r.active);
+
+    // Pylons reboot once the shield has been down long enough.
+    if (!this.shielded && time > this.shieldDownUntil) {
+      for (const part of this.parts) part.setData({ alive: true, hp: CAPTAIN.pylonHp }).setTexture('pylon');
+      s.setTexture('captain');
+      this.host.floatText(s.x, s.y - 24, 'SHIELD REBOOTED', '#c06bff');
+      this.host.sfx('bossRoar', s.x, s.y);
+    }
+    this.drawShield(time);
+
+    // Keep his distance and circle.
+    const a = this.angleToPlayer();
+    const d = Phaser.Math.Distance.Between(s.x, s.y, this.host.player.x, this.host.player.y);
+    const speed = CAPTAIN.walkSpeed[p];
+    if (time > this.nextSideFlip) {
+      this.side = -this.side;
+      this.nextSideFlip = time + Phaser.Math.Between(1600, 2800);
+    }
+    if (d < CAPTAIN.range[0]) s.setVelocity(-Math.cos(a) * speed, -Math.sin(a) * speed);
+    else if (d > CAPTAIN.range[1]) s.setVelocity(Math.cos(a) * speed, Math.sin(a) * speed);
+    else s.setVelocity(Math.cos(a + (Math.PI / 2) * this.side) * speed * 0.8, Math.sin(a + (Math.PI / 2) * this.side) * speed * 0.8);
+    s.setRotation(a);
+
+    const sees = this.host.canSee(s, this.host.player);
+    if (sees && time > this.nextBurst) {
+      this.nextBurst = time + CAPTAIN.burstEveryMs[p];
+      for (let i = 0; i < CAPTAIN.burstShots[p]; i++) {
+        this.host.time.delayedCall(i * 90, () => {
+          if (this.dead || !s.active) return;
+          const aim = this.angleToPlayer() + Phaser.Math.FloatBetween(-0.07, 0.07);
+          this.host.shootAtPlayer(s.x + Math.cos(aim) * 16, s.y + Math.sin(aim) * 16, aim, CAPTAIN.bulletSpeed, CAPTAIN.burstDamage, 'bullet');
+        });
+      }
+    }
+    if (time > this.nextGrenade) {
+      this.nextGrenade = time + CAPTAIN.grenadeEveryMs[p];
+      const count = CAPTAIN.grenades[p];
+      for (let i = 0; i < count; i++) {
+        const spread = count === 1 ? 0 : 38;
+        this.throwGrenade(
+          this.host.player.x + Phaser.Math.Between(-spread, spread),
+          this.host.player.y + Phaser.Math.Between(-spread, spread),
+        );
+      }
+    }
+    if (this.phase2 && time > this.nextBlink) {
+      this.nextBlink = time + CAPTAIN.blinkEveryMs;
+      this.blink();
+    }
+    if (this.phase2 && time > this.nextRaider && this.raiders.length < CAPTAIN.maxRaiders) {
+      this.nextRaider = time + CAPTAIN.raiderEveryMs;
+      const spot = this.farSpot(80);
+      const r = this.host.spawnEnemy('raider', spot.x, spot.y);
+      r.setData({ loot: [], alertUntil: time + 60000 });
+      this.raiders.push(r);
+      this.host.explosionAt(spot.x, spot.y, 8);
+    }
+
+    // Grenades that have landed tick down, then go off.
+    for (const g of this.grenades) {
+      if (g.fuseAt === null || time < g.fuseAt) continue;
+      this.detonate(g);
+    }
+    this.grenades = this.grenades.filter((g) => g.sprite.active);
+  }
+
+  private drawShield(time: number) {
+    const g = this.shieldGfx.clear();
+    if (this.dead) return;
+    const s = this.sprite;
+    // Power lines from the pylons.
+    for (const part of this.livingParts()) {
+      g.lineStyle(1, 0xc06bff, 0.35 + 0.2 * Math.sin(time / 120 + part.x)).lineBetween(part.x, part.y - 6, s.x, s.y);
+    }
+    if (!this.shielded) return;
+    const pulse = 0.25 + 0.12 * Math.sin(time / 150);
+    g.fillStyle(0xc06bff, pulse * 0.4).fillCircle(s.x, s.y, 21);
+    g.lineStyle(2, 0xe0c0ff, pulse + 0.3).strokeCircle(s.x, s.y, 21);
+  }
+
+  private throwGrenade(tx: number, ty: number) {
+    const s = this.sprite;
+    const sprite = this.host.add.image(s.x, s.y, 'grenade').setDepth(13);
+    const marker = this.host.add.graphics().setDepth(3);
+    marker.lineStyle(1, 0xff3b4e, 0.8).strokeCircle(tx, ty, CAPTAIN.grenadeRadius);
+    marker.fillStyle(0xff3b4e, 0.12).fillCircle(tx, ty, CAPTAIN.grenadeRadius);
+    const g: Grenade = { sprite, marker, tween: null, returned: false, fuseAt: null };
+    this.grenades.push(g);
+    this.flyGrenade(g, tx, ty, CAPTAIN.grenadeFlightMs);
+    this.host.sfx('enemyShot', s.x, s.y);
+  }
+
+  /** A lobbed arc: straight line on the floor, with the sprite swelling at the top of the arc. */
+  private flyGrenade(g: Grenade, tx: number, ty: number, ms: number) {
+    const fromX = g.sprite.x;
+    const fromY = g.sprite.y;
+    const state = { t: 0 };
+    g.tween = this.host.tweens.add({
+      targets: state,
+      t: 1,
+      duration: ms,
+      onUpdate: () => {
+        if (!g.sprite.active) return;
+        const t = state.t;
+        // Thrown back at him: it follows him as he moves.
+        const ex = g.returned ? this.sprite.x : tx;
+        const ey = g.returned ? this.sprite.y : ty;
+        g.sprite.setPosition(fromX + (ex - fromX) * t, fromY + (ey - fromY) * t - Math.sin(t * Math.PI) * 18);
+        g.sprite.setScale(1 + Math.sin(t * Math.PI) * 0.6).setRotation(t * 9);
+      },
+      onComplete: () => {
+        if (!g.sprite.active) return;
+        g.fuseAt = this.host.time.now + (g.returned ? 60 : CAPTAIN.grenadeFuseMs);
+        g.sprite.setScale(1);
+        if (!g.returned) this.host.tweens.add({ targets: g.sprite, alpha: 0.4, yoyo: true, repeat: 3, duration: 60 });
+      },
+    });
+  }
+
+  private detonate(g: Grenade) {
+    const { x, y } = g.sprite;
+    g.sprite.destroy();
+    g.marker.destroy();
+    this.host.explosionAt(x, y, CAPTAIN.grenadeRadius * 0.6);
+    this.host.shake(160, 0.01);
+    const r = CAPTAIN.grenadeRadius;
+    if (Phaser.Math.Distance.Between(x, y, this.host.player.x, this.host.player.y) < r) {
+      this.host.hurtPlayer(CAPTAIN.grenadeDamage);
+    }
+    if (!this.dead && Phaser.Math.Distance.Between(x, y, this.sprite.x, this.sprite.y) < r + this.radius) {
+      // His own grenade ignores his shield.
+      this.damage(CAPTAIN.grenadeSelfDamage, x, y);
+      this.host.floatText(this.sprite.x, this.sprite.y - 24, 'OWN GRENADE!', '#5ef2ff');
+    }
+  }
+
+  /** Phase 2: vanish in a puff of smoke and reappear somewhere well away from you. */
+  private blink() {
+    const s = this.sprite;
+    this.host.explosionAt(s.x, s.y, 10);
+    const spot = this.farSpot(110);
+    s.setAlpha(0);
+    s.setPosition(spot.x, spot.y);
+    (s.body as Phaser.Physics.Arcade.Body).reset(spot.x, spot.y);
+    this.host.tweens.add({ targets: s, alpha: 1, duration: 300 });
+    this.host.sfx('dodge', spot.x, spot.y);
+  }
+
+  private farSpot(min: number): Point {
+    const p = this.host.player;
+    const far = this.spots.filter((q) => Phaser.Math.Distance.Between(q.x, q.y, p.x, p.y) > min);
+    const pool = far.length ? far : this.spots;
+    return pool[Math.floor(Math.random() * pool.length)];
+  }
+
+  protected die() {
+    this.shieldGfx.clear();
+    for (const g of this.grenades) {
+      g.tween?.stop();
+      g.sprite.destroy();
+      g.marker.destroy();
+    }
+    this.grenades = [];
     super.die();
   }
 }

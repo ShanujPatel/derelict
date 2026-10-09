@@ -15,7 +15,7 @@ import {
   type ToolDef,
   type ToolId,
 } from './catalog';
-import { CHAPTERS, CODEX, chapterProgress, isResearchUnlocked } from './codex';
+import { CHAPTERS, CODEX, chapterProgress, isMiningUnlocked, isResearchUnlocked } from './codex';
 import { ACHIEVEMENT_IDS, type Achievement } from './achievements';
 import { TIP_IDS, type TipId } from './tips';
 import { BOSSES, BOSS_IDS, BOSS_UNLOCK_EXTRACTIONS, emptyBossRecords, type BossId, type BossRecord } from './bosses';
@@ -121,6 +121,8 @@ export interface Settings {
   assist: boolean;
   /** First-time tips during runs. */
   tips: boolean;
+  /** Daily runs: race the ghost of the day's best run. */
+  ghost: boolean;
 }
 
 export const ASSIST = { capacity: 1.5, damage: 0.5 } as const;
@@ -134,6 +136,7 @@ export const DEFAULT_SETTINGS: Settings = {
   minimap: false,
   assist: false,
   tips: true,
+  ghost: true,
 };
 
 export type ShopItem =
@@ -310,9 +313,14 @@ export function setTool(save: SaveData, id: ToolId): SaveData {
   return next;
 }
 
-/** Research vessels can only be chosen once their coordinates have been found in the codex. */
+/**
+ * Research vessels can only be chosen once their coordinates have been found
+ * in the codex; mining haulers with the ledger log or after a few extractions.
+ */
 export function canBoard(save: SaveData, ship: ShipType): boolean {
-  return ship === 'freighter' || isResearchUnlocked(save.codex);
+  if (ship === 'research') return isResearchUnlocked(save.codex);
+  if (ship === 'mining') return isMiningUnlocked(save.codex, save.stats.extractions);
+  return true;
 }
 
 export function setDestination(save: SaveData, ship: ShipType): SaveData {
@@ -351,6 +359,7 @@ export function sanitizeSettings(raw: unknown): Settings {
     minimap: flag(r.minimap, DEFAULT_SETTINGS.minimap),
     assist: flag(r.assist, DEFAULT_SETTINGS.assist),
     tips: flag(r.tips, DEFAULT_SETTINGS.tips),
+    ghost: flag(r.ghost, DEFAULT_SETTINGS.ghost),
   };
 }
 
@@ -421,7 +430,7 @@ export function applyRunResult(save: SaveData, result: RunResult): SaveData {
 /** Boss contracts open after a few extractions; the Bloom Mother also needs research vessels unlocked. */
 export function bossUnlocked(save: SaveData, id: BossId): boolean {
   if (save.stats.extractions < BOSS_UNLOCK_EXTRACTIONS) return false;
-  return BOSSES[id].ship === 'freighter' || isResearchUnlocked(save.codex);
+  return canBoard(save, BOSSES[id].ship);
 }
 
 /** Records a boss kill: pays the first-kill bonus once and keeps the best time. */
@@ -634,9 +643,6 @@ export function sanitizeSave(raw: unknown): SaveData {
   }
   if (perks.includes(lo.perk as PerkId)) save.loadout.perk = lo.perk as PerkId;
   if (tools.includes(lo.tool as ToolId)) save.loadout.tool = lo.tool as ToolId;
-  if (SHIP_TYPES.includes(lo.destination as ShipType) && canBoard(save, lo.destination as ShipType)) {
-    save.loadout.destination = lo.destination as ShipType;
-  }
   if (isObj(lo.looks)) {
     for (const c of Object.keys(COSMETICS) as CharacterId[]) {
       const look = lo.looks[c];
@@ -671,6 +677,10 @@ export function sanitizeSave(raw: unknown): SaveData {
     bestCombo: num(st.bestCombo),
     bountiesClaimed: num(st.bountiesClaimed),
   };
+  // After stats: mining haulers can be unlocked by extractions.
+  if (SHIP_TYPES.includes(lo.destination as ShipType) && canBoard(save, lo.destination as ShipType)) {
+    save.loadout.destination = lo.destination as ShipType;
+  }
   save.history = Array.isArray(raw.history)
     ? raw.history.map(sanitizeRecord).filter((r): r is RunRecord => r !== null).slice(0, HISTORY_LIMIT)
     : [];

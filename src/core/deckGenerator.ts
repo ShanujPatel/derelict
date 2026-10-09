@@ -12,6 +12,8 @@ export interface SpawnRule {
   value: [number, number];
   /** Only place against a wall (turrets). */
   againstWall?: boolean;
+  /** Place in the middle of a big room (sweepers), one per room. */
+  centre?: boolean;
 }
 
 export interface DeckOptions {
@@ -34,6 +36,8 @@ export interface DeckOptions {
   hazards: number;
   /** Cloaked stalkers (research vessels). */
   stalkers: number;
+  /** Extra ore veins in solid rock (mining haulers): cutting one opens a little alcove. */
+  oreVeins?: number;
 }
 
 const enemy = (count: number, minDistance: number, againstWall = false): SpawnRule => ({
@@ -88,6 +92,31 @@ export const DECK_OPTIONS: Record<ShipType, DeckOptions> = {
     mimics: 0,
     hazards: SHOCK.count.research,
     stalkers: 2,
+  },
+  /** v1.0: Gravecutter mining haulers. Big ore holds, ore in the cracked walls, mines and cutting lasers. */
+  mining: {
+    ship: 'mining',
+    width: 66,
+    height: 50,
+    maxRooms: 10,
+    minRoomSize: 7,
+    maxRoomSize: 13,
+    maxWeakWalls: 14,
+    spawns: [
+      ['drone', enemy(4, 12)],
+      ['sapper', enemy(5, 13)],
+      ['sweeper', { count: 3, minDistance: 14, value: [0, 0], centre: true }],
+      ['oxygen', { count: 5, minDistance: 1, value: [35, 35] }],
+      ['salvage', { count: 6, minDistance: 1, value: [6, 22] }],
+      ['cache', { count: 2, minDistance: 10, value: [35, 55] }],
+      ['datalog', { count: 1, minDistance: -0.6, value: [0, 0] }],
+    ],
+    medkits: { count: 3, heal: 35 },
+    drums: BARREL.count.mining,
+    mimics: 0,
+    hazards: SHOCK.count.mining,
+    stalkers: 0,
+    oreVeins: 9,
   },
 };
 
@@ -144,6 +173,7 @@ export function generateDeck(seed: string, ship: ShipType = 'freighter', options
   }
 
   const weakWalls = placeWeakWalls(rng, tiles, dist, opts.maxWeakWalls);
+  if (opts.oreVeins) weakWalls.push(...placeOreVeins(seed, ship, tiles, weakWalls, opts.oreVeins));
   const spawns = placeSpawns(rng, rooms, tiles, dist, start, extraction, opts);
   spawns.push(...placeMedkits(seed, ship, rooms, tiles, dist, spawns, [start, extraction], opts.medkits));
   spawns.push(...placeDrums(seed, ship, rooms, tiles, dist, spawns, [start, extraction], opts.drums));
@@ -275,6 +305,40 @@ function placeWeakWalls(rng: Rng, tiles: Tile[][], dist: number[][], max: number
     chosen.push(seg);
   }
   return chosen.flat();
+}
+
+/**
+ * Ore veins in solid rock: wall tiles with floor on exactly one side and rock
+ * on the other three, so cutting one opens an alcove and never a new route.
+ * Their own random stream, spaced apart.
+ */
+function placeOreVeins(seed: string, ship: ShipType, tiles: Tile[][], existing: Point[], count: number): Point[] {
+  const rng = createRng(hashString(`${seed}:${ship}:ore`));
+  const h = tiles.length;
+  const w = tiles[0].length;
+  const at = (x: number, y: number) => tiles[y]?.[x];
+  const candidates: Point[] = [];
+  for (let y = 2; y < h - 2; y++) {
+    for (let x = 2; x < w - 2; x++) {
+      if (at(x, y) !== Tile.Wall) continue;
+      const sides = [at(x + 1, y), at(x - 1, y), at(x, y + 1), at(x, y - 1)];
+      if (sides.filter((t) => t === Tile.Floor).length !== 1) continue;
+      if (sides.filter((t) => t === Tile.Wall).length !== 3) continue;
+      // Diagonals must be rock too, so the alcove doesn't touch another room.
+      const diag = [at(x + 1, y + 1), at(x - 1, y + 1), at(x + 1, y - 1), at(x - 1, y - 1)];
+      if (diag.filter((t) => t === Tile.Floor).length > 2) continue;
+      candidates.push({ x, y });
+    }
+  }
+  const chosen: Point[] = [];
+  const far = (p: Point) => [...existing, ...chosen].every((q) => Math.abs(p.x - q.x) + Math.abs(p.y - q.y) >= 5);
+  for (const p of rng.shuffle(candidates)) {
+    if (chosen.length >= count) break;
+    if (!far(p)) continue;
+    tiles[p.y][p.x] = Tile.WeakWall;
+    chosen.push(p);
+  }
+  return chosen;
 }
 
 /**
@@ -418,9 +482,27 @@ function placeSpawns(
   const nextToWall = (x: number, y: number) =>
     [[1, 0], [-1, 0], [0, 1], [0, -1]].some(([dx, dy]) => tiles[y + dy]?.[x + dx] === Tile.Wall);
 
+  const centred = new Set<Room>();
   for (const [kind, rule] of o.spawns) {
     const minDist = rule.minDistance < 0 ? Math.floor(-rule.minDistance * furthest) : rule.minDistance;
     let placed = 0;
+    if (rule.centre) {
+      // One per big room, in its middle, so the beam sweeps the whole room.
+      const big = otherRooms.filter((r) => r.w >= 7 && r.h >= 7 && !centred.has(r));
+      for (const r of rng.shuffle(big)) {
+        if (placed >= rule.count) break;
+        const p = centre(r);
+        const key = `${p.x},${p.y}`;
+        if (taken.has(key) || tiles[p.y][p.x] !== Tile.Floor || dist[p.y][p.x] < minDist) continue;
+        // Never in the exit's room: you'd have to cross the beam to leave.
+        if (extraction.x >= r.x && extraction.x < r.x + r.w && extraction.y >= r.y && extraction.y < r.y + r.h) continue;
+        taken.add(key);
+        centred.add(r);
+        spawns.push({ ...p, kind: kind as SpawnKind, value: 0 });
+        placed++;
+      }
+      continue;
+    }
     for (let attempt = 0; attempt < rule.count * 60 && placed < rule.count; attempt++) {
       const r = rng.pick(otherRooms);
       const p = { x: rng.int(r.x, r.x + r.w - 1), y: rng.int(r.y, r.y + r.h - 1) };

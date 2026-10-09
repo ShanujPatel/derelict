@@ -31,15 +31,18 @@ import { DEPTH, baseSeed, deeperSeed, depthMods, placeLift, type Carry } from '.
 import { bfsDistances } from '../core/pathing';
 import { NO_COMBO, comboAfterPickup, comboMultiplier, comboTimeLeft, type ComboState } from '../core/combo';
 import { NO_EFFECTS, combineMutators, weekFromSeed, weeklySetup, type Mutator, type MutatorEffects } from '../core/weekly';
-import { BOSSES, type BossId } from '../core/bosses';
-import { BossFight, ForemanFight, MotherFight, type BossHost } from './boss';
-import { ASSIST, applyRunResult, awardAchievements, recordStreak, markTipSeen, recordWeekly, computeRunStats, recordBossKill, recordRun, recordDaily, setClaimedName, type RunStats, type SaveData } from '../core/progression';
+import { BOSSES, CAPTAIN, FOREMAN, MOTHER, type BossId } from '../core/bosses';
+import { BossFight, CaptainFight, ForemanFight, MotherFight, type BossHost } from './boss';
+import { ASSIST, applyRunResult, canBoard, awardAchievements, recordStreak, markTipSeen, recordWeekly, computeRunStats, recordBossKill, recordRun, recordDaily, setClaimedName, type RunStats, type SaveData } from '../core/progression';
 import { hashString, type ResolvedSeed } from '../core/seed';
 import { ENEMY_KINDS, Tile, type EnemyKind, type Point } from '../core/types';
 import { checkRunReport, type RunReport } from '../core/hallOfFame';
 import { WEAPONS, chainTargets, pelletAngles, type WeaponDef } from '../core/weapons';
 import { leaderboard } from '../net/leaderboard';
-import { loadSave, storeSave } from '../storage';
+import { loadOwnGhost, loadSave, storeOwnGhost, storeSave } from '../storage';
+import { GhostRecorder, decodeGhost, type Ghost } from '../core/ghost';
+import { GhostView } from './ghostView';
+import { weekFromWeeklySeed } from '../core/leaderboard';
 import { TouchControls } from '../ui/TouchControls';
 import { pad } from '../ui/Gamepad';
 import { AIM_MIN, PAD, STICK_FIRE, TRIGGER_FIRE } from '../core/gamepad';
@@ -64,6 +67,11 @@ import {
   isExplored,
   reveal,
   rollSupplyDrop,
+  MINE,
+  ORE,
+  SWEEPER,
+  beamEnd,
+  distanceToSegment,
 } from '../core/fieldkit';
 import { spatialise, type SfxName } from '../core/sfx';
 import { ENEMY_STATS, RIVAL_KINDS, TURRET_LOCK_MS, isHacked, kindOf, updateEnemy, wakeMimic, type EnemyWorld } from './enemies';
@@ -83,7 +91,12 @@ const TOOL_LABEL = { torch: 'TORCH', hacker: 'HACK', grav: 'GRAV', sentry: 'SENT
 const SUFFOCATION_DPS = 6;
 const HACK_RANGE = 32;
 const HACK_BREAK_RANGE = 46;
-const DARKNESS = { freighter: 0.6, research: 0.7 } as const;
+/** How each ship type looks: darkness, lamp colour, boarding title and scanner colours. */
+const SHIP_LOOK = {
+  freighter: { dark: 0.6, lamp: null, title: 'BOARDING DERELICT', titleColour: '#ffd166', mini: 0x3d5a8a, floor: 0x1d2b45, wall: 0x6f8fc0, frame: 0x6fd6ff },
+  research: { dark: 0.7, lamp: 0x9bff5c, title: 'BOARDING RESEARCH VESSEL', titleColour: '#9bff5c', mini: 0x2c6f66, floor: 0x173a36, wall: 0x4fd8d0, frame: 0x4fd8d0 },
+  mining: { dark: 0.66, lamp: 0xffb347, title: 'BOARDING MINING HAULER', titleColour: '#ffb347', mini: 0x7a5c36, floor: 0x3a2d1f, wall: 0xc99a5a, frame: 0xffb347 },
+} as const;
 
 const FONT = { fontFamily: 'monospace', fontSize: '10px', color: '#d7e3ff' };
 
@@ -208,6 +221,14 @@ export class GameScene extends Phaser.Scene implements EnemyWorld, BossHost {
   private rivalsKilled = 0;
   private rivalsBoarded = 0;
   private hacks = 0;
+  /** Ore veins cut open this run (mining haulers). */
+  private oreVeins = 0;
+  /** Daily runs: your path (to post as a ghost) and the ghost you're racing. */
+  private ghostRecorder: GhostRecorder | null = null;
+  private ghostView: GhostView | null = null;
+  /** Bumped every run, so a ghost that loads after a restart is dropped. */
+  private runToken = 0;
+  private nextBeamTick = 0;
   private explored: Uint8Array = new Uint8Array(0);
   private nextRevealAt = 0;
   private mapOpen = false;
@@ -322,6 +343,8 @@ export class GameScene extends Phaser.Scene implements EnemyWorld, BossHost {
     this.rivalsKilled = 0;
     this.rivalsBoarded = 0;
     this.hacks = 0;
+    this.oreVeins = 0;
+    this.nextBeamTick = 0;
     this.nextRevealAt = 0;
     this.nextMiniAt = 0;
     this.mapOpen = false;
@@ -348,6 +371,10 @@ export class GameScene extends Phaser.Scene implements EnemyWorld, BossHost {
 
     // A deep dive's clock covers every deck so far.
     this.runStartedAt = this.time.now - (this.run.carry?.elapsedMs ?? 0);
+    this.runToken += 1;
+    this.ghostView = null;
+    this.ghostRecorder = this.run.mode === 'daily' ? new GhostRecorder() : null;
+    if (this.run.mode === 'daily' && this.saveAtStart.settings.ghost) this.loadGhost(this.runToken);
     audio.setSettings(this.saveAtStart.settings);
     audio.startMusic(this.run.ship);
     audio.setIntensity(0);
@@ -389,7 +416,8 @@ export class GameScene extends Phaser.Scene implements EnemyWorld, BossHost {
     // Blinking warning lamps on some bulkheads.
     for (const p of this.condition.lampsOff ? [] : lampPositions(display, this.seedHash)) {
       const lamp = this.add.image(p.x * TILE_SIZE + 8, p.y * TILE_SIZE + 9, 'lamp').setDepth(3);
-      if (this.run.ship === 'research') lamp.setTint(0x9bff5c);
+      const tint = SHIP_LOOK[this.run.ship].lamp;
+      if (tint) lamp.setTint(tint);
       this.tweens.add({
         targets: lamp,
         alpha: 0.25,
@@ -614,11 +642,9 @@ export class GameScene extends Phaser.Scene implements EnemyWorld, BossHost {
       ? `CONTRACT · ${BOSSES[this.run.boss].arena.toUpperCase()}`
       : this.depth > 1
         ? `DEPTH ${this.depth} · RICHER, NASTIER`
-        : this.run.ship === 'research'
-          ? 'BOARDING RESEARCH VESSEL'
-          : 'BOARDING DERELICT';
+        : SHIP_LOOK[this.run.ship].title;
     const titleText = this.add
-      .text(w / 2, h * 0.22, title, { ...FONT, fontSize: '16px', color: this.run.ship === 'research' ? '#9bff5c' : '#ffd166' })
+      .text(w / 2, h * 0.22, title, { ...FONT, fontSize: '16px', color: SHIP_LOOK[this.run.ship].titleColour })
       .setOrigin(0.5)
       .setScrollFactor(0)
       .setDepth(200);
@@ -700,6 +726,12 @@ export class GameScene extends Phaser.Scene implements EnemyWorld, BossHost {
       e.setAlpha(0.08);
     }
     if (kind === 'egg') e.anims.play({ key: 'egg-pulse', startFrame: Math.round(x) % 2 });
+    if (kind === 'sapper') e.anims.play({ key: 'sapper-blink', startFrame: Math.round(x + y) % 2 });
+    if (kind === 'sweeper') {
+      // Seeded by position so a shared ship sweeps the same way.
+      const spin = Math.round(x / TILE_SIZE + y / TILE_SIZE) % 2 === 0 ? 1 : -1;
+      e.setData({ beam: ((x * 7 + y * 13) % 628) / 100, spin });
+    }
     if (kind === 'mimic') e.setData('dormant', true).setFrame(0);
     if (kind === 'turret') {
       e.setData('barrel', this.add.image(x, y, 'barrel').setOrigin(0.2, 0.5).setDepth(11));
@@ -721,7 +753,9 @@ export class GameScene extends Phaser.Scene implements EnemyWorld, BossHost {
     const triggered: TipId[] = [];
     if (this.oxygen.current < this.oxygen.max * 0.35) triggered.push('oxygen-low');
     if (this.hostiles().some((e) => !e.getData('dormant') && time < (e.getData('alertUntil') ?? 0) && near(e.x, e.y, 200))) triggered.push('hostile');
-    if (this.barrels().some((d) => near(d.x, d.y, 80))) triggered.push('drum');
+    if (this.barrels().some((d) => !d.getData('mine') && near(d.x, d.y, 80))) triggered.push('drum');
+    if (this.barrels().some((d) => d.getData('mine') && near(d.x, d.y, 120))) triggered.push('mine');
+    if (this.hostiles().some((e) => kindOf(e) === 'sweeper' && near(e.x, e.y, 170))) triggered.push('sweeper');
     if (this.liftPad && near(this.liftPad.x, this.liftPad.y, 140)) triggered.push('lift');
     if ((this.deck.hazards ?? []).some((h) => near((h.x + h.w / 2) * TILE_SIZE, (h.y + h.h / 2) * TILE_SIZE, 90))) triggered.push('shock');
     if (pickupNear('datalog', 90)) triggered.push('datalog');
@@ -730,6 +764,7 @@ export class GameScene extends Phaser.Scene implements EnemyWorld, BossHost {
     const t = this.tileAt(this.player.x, this.player.y);
     let wall = false;
     for (let dy = -3; dy <= 3 && !wall; dy++) for (let dx = -3; dx <= 3; dx++) if (this.grid[t.y + dy]?.[t.x + dx] === Tile.WeakWall) wall = true;
+    if (wall && this.run.ship === 'mining' && !this.arena) triggered.push('ore');
     if (wall && this.stats.tool.id === 'torch') triggered.push('weak-wall');
     if (near(this.exitPad.x, this.exitPad.y, 160) && this.time.now - this.runStartedAt > 3000) triggered.push('exit');
     if (time - this.runStartedAt > 40000) triggered.push('scanner');
@@ -857,6 +892,8 @@ export class GameScene extends Phaser.Scene implements EnemyWorld, BossHost {
     const seconds = delta / 1000;
 
     this.updatePlayer(time);
+    this.ghostRecorder?.sample(time - this.runStartedAt, this.player.x, this.player.y);
+    this.ghostView?.update(time - this.runStartedAt);
     if (!this.rivalsArrived && time - this.runStartedAt > this.rivals.arrivesAfter * 1000) this.spawnRivals();
     for (const e of this.enemies.getChildren() as Sprite[]) if (e.active) updateEnemy(e, this, time);
     if (this.boss && !this.boss.dead) {
@@ -876,6 +913,7 @@ export class GameScene extends Phaser.Scene implements EnemyWorld, BossHost {
     this.updateBounty(time);
     this.updateSentry(time);
     this.updateHazards(time);
+    this.updateMines(time);
     this.drawTurretLasers(time);
     this.updateSelfRepair(time, seconds);
     this.updateTips(time);
@@ -920,7 +958,7 @@ export class GameScene extends Phaser.Scene implements EnemyWorld, BossHost {
     g.fillStyle(0x05070c, 0.75).fillRect(x0 - 2, y0 - 2, mw + 4, mh + 4);
     g.lineStyle(1, 0x2a3550, 1).strokeRect(x0 - 2.5, y0 - 2.5, mw + 5, mh + 5);
     const room = this.condition.scannerJammed ? this.currentRoom() : null;
-    g.fillStyle(this.run.ship === 'research' ? 0x2c6f66 : 0x3d5a8a, 1);
+    g.fillStyle(SHIP_LOOK[this.run.ship].mini, 1);
     for (let y = 0; y < this.deck.height; y++) {
       for (let x = 0; x < this.deck.width; x++) {
         if (this.grid[y][x] !== Tile.Floor || !isExplored(this.explored, this.deck.width, { x, y })) continue;
@@ -945,12 +983,12 @@ export class GameScene extends Phaser.Scene implements EnemyWorld, BossHost {
 
   private drawScanner() {
     const f = this.mapFrame();
-    const research = this.run.ship === 'research';
+    const look = SHIP_LOOK[this.run.ship];
     if (this.mapDirty) {
       this.mapDirty = false;
       const g = this.mapTiles.clear();
       g.fillStyle(0x05070c, 0.94).fillRect(f.x - 6, f.y - 6, f.mw + 12, f.mh + 12);
-      g.lineStyle(1, research ? 0x4fd8d0 : 0x6fd6ff, 0.6).strokeRect(f.x - 6.5, f.y - 6.5, f.mw + 13, f.mh + 13);
+      g.lineStyle(1, look.frame, 0.6).strokeRect(f.x - 6.5, f.y - 6.5, f.mw + 13, f.mh + 13);
       const room = this.currentRoom();
       const jammed = this.condition.scannerJammed;
       for (let y = 0; y < this.deck.height; y++) {
@@ -958,13 +996,13 @@ export class GameScene extends Phaser.Scene implements EnemyWorld, BossHost {
           if (!isExplored(this.explored, this.deck.width, { x, y })) continue;
           if (jammed && !(room && x >= room.x - 1 && x <= room.x + room.w && y >= room.y - 1 && y <= room.y + room.h)) continue;
           const t = this.grid[y][x];
-          if (t === Tile.Floor) g.fillStyle(research ? 0x173a36 : 0x1d2b45, 1);
+          if (t === Tile.Floor) g.fillStyle(look.floor, 1);
           else if (t === Tile.WeakWall) g.fillStyle(0x8a6a2a, 1);
           else {
             // Only draw walls that touch floor, so rooms read as outlines.
             const edge = [[1, 0], [-1, 0], [0, 1], [0, -1]].some(([dx, dy]) => this.grid[y + dy]?.[x + dx] === Tile.Floor);
             if (!edge) continue;
-            g.fillStyle(research ? 0x4fd8d0 : 0x6f8fc0, 0.75);
+            g.fillStyle(look.wall, 0.75);
           }
           g.fillRect(f.x + x * f.cell, f.y + y * f.cell, f.cell, f.cell);
         }
@@ -1325,6 +1363,113 @@ export class GameScene extends Phaser.Scene implements EnemyWorld, BossHost {
       g.lineStyle(1, 0xff3b4e, 0.35 + 0.5 * (1 - left / TURRET_LOCK_MS));
       g.lineBetween(e.x + Math.cos(a) * 9, e.y + Math.sin(a) * 9, e.x + Math.cos(a) * len, e.y + Math.sin(a) * len);
     }
+    this.updateSweepers(time, g);
+  }
+
+  /**
+   * Sweeper beams: drawn every frame, stopped by walls. Touching a hostile beam
+   * hurts (a dodge roll's i-frames get you through); a hacked one burns hostiles.
+   */
+  private updateSweepers(time: number, g: Phaser.GameObjects.Graphics) {
+    const tick = time > this.nextBeamTick;
+    if (tick) this.nextBeamTick = time + SWEEPER.hackedTickMs;
+    for (const e of [...this.enemies.getChildren()] as Sprite[]) {
+      if (!e.active || kindOf(e) !== 'sweeper' || time < (e.getData('stunnedUntil') ?? 0)) continue;
+      const a = (e.getData('beam') as number | undefined) ?? 0;
+      const sx = e.x + Math.cos(a) * 8;
+      const sy = e.y + Math.sin(a) * 8;
+      const end = beamEnd(this.grid, sx, sy, a, SWEEPER.beamLength, TILE_SIZE);
+      const hacked = isHacked(e);
+      const flicker = 0.75 + 0.25 * Math.sin(time / 40);
+      g.lineStyle(5, hacked ? 0x2fb8c9 : 0xff5a1f, 0.25 * flicker).lineBetween(sx, sy, end.x, end.y);
+      g.lineStyle(2, hacked ? 0x9ff6ff : 0xffb347, 0.9 * flicker).lineBetween(sx, sy, end.x, end.y);
+      g.fillStyle(hacked ? 0xe0fbff : 0xffe0b0, 0.9).fillCircle(end.x, end.y, 2 + Math.sin(time / 30));
+      if (hacked) {
+        if (!tick) continue;
+        for (const h of this.hostiles()) {
+          if (h === e) continue;
+          if (distanceToSegment(h.x, h.y, sx, sy, end.x, end.y) < SWEEPER.beamWidth + 4) this.damageEnemy(h, SWEEPER.hackedDamage);
+        }
+      } else if (distanceToSegment(this.player.x, this.player.y, sx, sy, end.x, end.y) < SWEEPER.beamWidth) {
+        this.hurtPlayer(SWEEPER.damage);
+      }
+    }
+  }
+
+  // ---------------------------------------------------------------- daily ghost
+
+  /** Fetches the day's leading ghost (or your own best, offline) and sets it running. */
+  private async loadGhost(token: number) {
+    const day = dayFromDailySeed(this.run.seed);
+    if (!day) return;
+    let found: { name: string; ghost: Ghost; score: number } | null = null;
+    if (leaderboard.enabled) {
+      try {
+        const g = await leaderboard.dailyGhost(day);
+        if (g) found = { name: g.callsign, ghost: g.ghost, score: g.score };
+      } catch {
+        /* offline: fall back to your own */
+      }
+    }
+    if (!found) {
+      const own = loadOwnGhost(day);
+      const ghost = decodeGhost(own?.ghost);
+      if (own && ghost) found = { name: 'YOUR BEST', ghost, score: own.score };
+    }
+    if (!found || token !== this.runToken || this.ended || !this.sys.isActive()) return;
+    const look = ensureCharacterTexture(this, this.stats.character.id, this.stats.colours);
+    this.ghostView = new GhostView(this, found.ghost, look.texture, found.name);
+    this.floatText(this.player.x, this.player.y - 20, `GHOST: ${found.name} · ${found.score}`, '#9ff6ff');
+  }
+
+  // ---------------------------------------------------------------- sapper mines
+
+  layMine(e: Sprite) {
+    const mine = this.drums.create(e.x, e.y, 'mine', 0) as Sprite;
+    mine.setDepth(5).setData({
+      hp: 1,
+      lit: false,
+      mine: true,
+      owner: e,
+      armAt: this.time.now + MINE.armMs,
+      expireAt: this.time.now + MINE.lifetimeMs,
+      radius: MINE.radius,
+      playerDamage: MINE.playerDamage,
+      enemyDamage: MINE.enemyDamage,
+    });
+    (mine.body as Phaser.Physics.Arcade.StaticBody).setSize(6, 6);
+    // Mines don't block anyone: you walk onto them.
+    (mine.body as Phaser.Physics.Arcade.StaticBody).checkCollision.none = true;
+    this.sfx('hackTick', e.x, e.y);
+  }
+
+  minesOf(e: Sprite): number {
+    return (this.drums.getChildren() as Sprite[]).filter((d) => d.active && d.getData('owner') === e).length;
+  }
+
+  /** Mines arm, blink, and go off a moment after you get close. */
+  private updateMines(time: number) {
+    for (const m of [...this.drums.getChildren()] as Sprite[]) {
+      if (!m.active || !m.getData('mine') || m.getData('lit')) continue;
+      if (time > (m.getData('expireAt') as number)) {
+        this.sparks.explode(4, m.x, m.y);
+        m.destroy();
+        continue;
+      }
+      const armed = time > (m.getData('armAt') as number);
+      const triggered = m.getData('triggeredAt') as number | undefined;
+      if (triggered !== undefined) {
+        m.setFrame(Math.floor(time / 60) % 2);
+        if (time > triggered + MINE.fuseMs) this.explodeDrum(m);
+        continue;
+      }
+      m.setFrame(armed && Math.floor(time / 400) % 2 === 0 ? 1 : 0);
+      if (armed && Phaser.Math.Distance.Between(m.x, m.y, this.player.x, this.player.y) < MINE.triggerRadius) {
+        m.setData('triggeredAt', time);
+        this.sfx('denied', m.x, m.y);
+        this.floatText(m.x, m.y - 8, 'MINE!', '#ff5a6a');
+      }
+    }
   }
 
   /** Self-repair perk (robot): out of combat, battery becomes hull. */
@@ -1466,6 +1611,8 @@ export class GameScene extends Phaser.Scene implements EnemyWorld, BossHost {
       e.setData({ stunnedUntil: this.time.now + 700, alertUntil: this.time.now + 4000 });
       this.damageEnemy(e, 1);
     }
+    // The Hollow Captain's grenades fly back at him.
+    if (this.boss instanceof CaptainFight && !this.boss.dead) this.boss.deflect((gx, gy) => inGravCone(x, y, aim, gx, gy));
     for (const shot of this.hostileShots.getChildren() as Sprite[]) {
       if (shot.active && inGravCone(x, y, aim, shot.x, shot.y)) {
         this.sparks.explode(4, shot.x, shot.y);
@@ -1475,6 +1622,14 @@ export class GameScene extends Phaser.Scene implements EnemyWorld, BossHost {
   }
 
   private cutTile(x: number, y: number) {
+    // Mining haulers: every cracked wall is an ore vein.
+    if (this.run.ship === 'mining' && !this.arena && this.grid[y][x] === Tile.WeakWall) {
+      const w = toWorld({ x, y });
+      this.oreVeins += 1;
+      const value = Math.round(Phaser.Math.Between(...ORE.value) * this.condition.salvage);
+      this.time.delayedCall(80, () => this.addPickup(w.x + Phaser.Math.Between(-3, 3), w.y + Phaser.Math.Between(-3, 3), 'salvage', value, 'ore'));
+      this.floatText(w.x, w.y - 16, 'ORE', '#ffb347');
+    }
     this.grid[y][x] = Tile.Floor;
     this.mapDirty = true;
     // Redraw this tile and its neighbours so wall faces and shadows stay correct.
@@ -1491,7 +1646,7 @@ export class GameScene extends Phaser.Scene implements EnemyWorld, BossHost {
   /** Things the hacking tool works on: hostile turrets and locked caches. */
   private hackables(): Sprite[] {
     const turrets = (this.enemies.getChildren() as Sprite[]).filter(
-      (e) => e.active && kindOf(e) === 'turret' && !isHacked(e),
+      (e) => e.active && (kindOf(e) === 'turret' || kindOf(e) === 'sweeper') && !isHacked(e),
     );
     const caches = (this.caches.getChildren() as Sprite[]).filter((c) => !c.getData('open'));
     return [...turrets, ...caches];
@@ -1544,6 +1699,10 @@ export class GameScene extends Phaser.Scene implements EnemyWorld, BossHost {
       target.setData('hacked', true).setFrame(1);
       (target.getData('barrel') as Phaser.GameObjects.Image).setTint(0x9ff6ff);
       this.floatText(target.x, target.y - 12, 'TURRET HACKED', '#5ef2ff');
+      audio.play('hackDone');
+    } else if (target.getData('kind') === 'sweeper') {
+      target.setData('hacked', true).setFrame(1);
+      this.floatText(target.x, target.y - 12, 'LASER HACKED', '#5ef2ff');
       audio.play('hackDone');
     } else {
       target.setData('open', true).setFrame(1);
@@ -1832,6 +1991,7 @@ export class GameScene extends Phaser.Scene implements EnemyWorld, BossHost {
         rivalsKilled: this.rivalsKilled,
         rivalsBoarded: this.rivalsBoarded,
         hacks: this.hacks,
+        oreVeins: this.oreVeins,
         elitesKilled: this.elitesKilled,
         bossKilled: this.bossDefeated?.id ?? null,
         weekly: week !== null,
@@ -1847,10 +2007,11 @@ export class GameScene extends Phaser.Scene implements EnemyWorld, BossHost {
     const banked = after.credits - before.credits;
     const newBest = extracted && this.salvage > before.stats.bestHaul;
     const unlockedResearch = !isResearchUnlocked(before.codex) && isResearchUnlocked(after.codex);
+    const unlockedMining = !canBoard(before, 'mining') && canBoard(after, 'mining');
 
     // Results appear after the extraction / death moment has played out.
     this.time.delayedCall(extracted ? 800 : 950, () =>
-      this.showResults(extracted, reason, { before, after, day, durationMs, bonus, banked, newBest, unlockedResearch, earned, bossResult, streak }),
+      this.showResults(extracted, reason, { before, after, day, durationMs, bonus, banked, newBest, unlockedResearch, unlockedMining, earned, bossResult, streak }),
     );
   }
 
@@ -1887,12 +2048,13 @@ export class GameScene extends Phaser.Scene implements EnemyWorld, BossHost {
       banked: number;
       newBest: boolean;
       unlockedResearch: boolean;
+      unlockedMining: boolean;
       earned: Achievement[];
       bossResult: { firstKill: boolean; best: boolean; ms: number } | null;
       streak: { count: number; bonus: number } | null;
     },
   ) {
-    const { after, day, durationMs, bonus, banked, newBest, unlockedResearch, earned, bossResult, streak } = r;
+    const { after, day, durationMs, bonus, banked, newBest, unlockedResearch, unlockedMining, earned, bossResult, streak } = r;
     this.physics.pause();
     this.physics.world.timeScale = 1;
     this.tweens.timeScale = 1;
@@ -1931,13 +2093,14 @@ export class GameScene extends Phaser.Scene implements EnemyWorld, BossHost {
     if (this.logsFound.length) lines.push(`Data log kept: ${this.logsFound.length}`);
     if (bonus) lines.push('Chapter complete! +bonus salvage');
     if (unlockedResearch) lines.push('NEW DESTINATION: research vessels');
+    if (unlockedMining) lines.push('NEW DESTINATION: mining haulers');
     for (const a of earned) lines.push(`★ ${a.name.toUpperCase()}  +${a.reward}`);
     const paidWithoutExtracting = (bonus || earned.length > 0) && !extracted;
     lines.push(`Ship's hold: ${after.credits}${paidWithoutExtracting ? ` (+${banked})` : ''}`);
     if (earned.length) this.time.delayedCall(300, () => audio.play('achievement'));
     const summary = ui(this.add.text(w / 2, h / 2 - 12, lines.join('\n'), { ...FONT, fontSize: '11px', align: 'center' }).setOrigin(0.5));
     // Keep the title clear of the summary however many lines it has.
-    title.setY(summary.y - summary.height / 2 - (extracted && day ? 34 : 18));
+    title.setY(summary.y - summary.height / 2 - (extracted && (day || this.run.mode === 'weekly') ? 34 : 18));
 
     const retry = () => {
       audio.play('launch');
@@ -1977,6 +2140,43 @@ export class GameScene extends Phaser.Scene implements EnemyWorld, BossHost {
 
     this.postToHallOfFame(extracted, durationMs, after);
 
+    // Keep your own best daily path locally, so there's a ghost to race offline too.
+    const ghost = day && extracted && this.ghostRecorder ? this.ghostRecorder.encode() : null;
+    if (day && ghost) storeOwnGhost({ day, score: this.salvage, durationMs: Math.round(durationMs), ghost });
+
+    // Weekly Challenge: post to the week's board.
+    const weekId = this.run.mode === 'weekly' ? weekFromWeeklySeed(this.run.seed) : null;
+    if (weekId && extracted && leaderboard.enabled) {
+      const status = ui(
+        this.add
+          .text(w / 2, summary.y - summary.height / 2 - 12, 'Posting to weekly board…', { ...FONT, fontSize: '10px', color: '#c9a0ff' })
+          .setOrigin(0.5),
+      );
+      if (this.saveAtStart.settings.assist) status.setText('Assist mode: not posted to the weekly board');
+      else {
+        leaderboard
+          .submitWeekly({
+            week: weekId,
+            seed: this.run.seed,
+            ship: this.run.ship,
+            callsign: after.callsign,
+            score: this.salvage,
+            kills: this.kills,
+            durationMs,
+            character: this.stats.character.id,
+            playerId: after.playerId,
+          })
+          .then((r) => {
+            if (after.callsign !== after.callsignClaimed) storeSave(setClaimedName(loadSave(), after.callsign));
+            if (status.active) status.setText(`WEEKLY RANK #${r.rank} of ${r.total} · best ${r.best}`);
+          })
+          .catch((e: Error) => {
+            const message = /name taken/.test(e.message) ? 'Name taken. Pick a new one in CREW' : `Weekly board: ${e.message}`;
+            if (status.active) status.setText(message).setColor('#ff9a3c');
+          });
+      }
+    }
+
     // Daily Derelict: post the score and show the rank when it comes back.
     if (day && extracted) {
       const status = ui(
@@ -2005,6 +2205,10 @@ export class GameScene extends Phaser.Scene implements EnemyWorld, BossHost {
           })
           .then((r) => {
             this.lastRank = { rank: r.rank, total: r.total };
+            // This run is your best today: post its path for others to race.
+            if (r.best === this.salvage && ghost) {
+              leaderboard.submitGhost(day, after.playerId, this.salvage, durationMs, ghost).catch(() => undefined);
+            }
             // Posting reserves your name, so there's no need to check it again.
             if (after.callsign !== after.callsignClaimed) storeSave(setClaimedName(loadSave(), after.callsign));
             if (status.active) status.setText(`DAILY RANK #${r.rank} of ${r.total} · best ${r.best}`);
@@ -2059,7 +2263,7 @@ export class GameScene extends Phaser.Scene implements EnemyWorld, BossHost {
   private drawLighting() {
     const view = this.cameras.main.worldView;
     const rt = this.darkness;
-    rt.clear().fill(0x000000, Math.min(0.9, DARKNESS[this.run.ship] + this.condition.darkness));
+    rt.clear().fill(0x000000, Math.min(0.9, SHIP_LOOK[this.run.ship].dark + this.condition.darkness));
     const light = (key: string, x: number, y: number, size: number) => {
       if (x < view.x - size || x > view.right + size || y < view.y - size || y > view.bottom + size) return;
       rt.erase(key, x - view.x - size, y - view.y - size);
@@ -2253,7 +2457,7 @@ export class GameScene extends Phaser.Scene implements EnemyWorld, BossHost {
     const parts = arena.features.map((f) => {
       const { x, y } = toWorld(f);
       const part = this.bossParts.create(x, y, f.kind) as Sprite;
-      const hp = f.kind === 'coupling' ? 5 : 6;
+      const hp = f.kind === 'coupling' ? FOREMAN.couplingHp : f.kind === 'pylon' ? CAPTAIN.pylonHp : MOTHER.rootHp;
       part.setDepth(6).setData({ kind: f.kind, hp, alive: true });
       (part.body as Phaser.Physics.Arcade.StaticBody).setSize(10, 10);
       return part;
@@ -2270,6 +2474,17 @@ export class GameScene extends Phaser.Scene implements EnemyWorld, BossHost {
         { x: (a.x + a.w - 1) * TILE_SIZE, y: (a.y + a.h / 2) * TILE_SIZE },
       ];
       this.boss = new ForemanFight(this, bx, by, parts, hatches);
+    } else if (arena.boss === 'captain') {
+      // Open floor he can blink to: a grid over the arena, skipping pillars.
+      const a = SECTIONS.arena;
+      const spots: Point[] = [];
+      for (let ty = a.y + 2; ty < a.y + a.h - 3; ty += 3) {
+        for (let tx = a.x + 2; tx < a.x + a.w - 2; tx += 3) {
+          const clear = [0, 1].every((dy) => [0, 1].every((dx) => this.grid[ty + dy]?.[tx + dx] === Tile.Floor));
+          if (clear) spots.push({ x: (tx + 1) * TILE_SIZE, y: (ty + 1) * TILE_SIZE });
+        }
+      }
+      this.boss = new CaptainFight(this, bx, by, parts, spots);
     } else {
       this.boss = new MotherFight(this, bx, by, parts);
     }
@@ -2285,7 +2500,7 @@ export class GameScene extends Phaser.Scene implements EnemyWorld, BossHost {
     this.physics.add.collider(this.player, this.bossParts);
     this.physics.add.collider(this.enemies, this.bossParts);
     this.physics.add.collider(this.player, s, () => {
-      if (boss instanceof ForemanFight || boss instanceof MotherFight) boss.touchPlayer();
+      if (boss instanceof ForemanFight || boss instanceof MotherFight || boss instanceof CaptainFight) boss.touchPlayer();
     });
     this.physics.add.overlap(this.bullets, s, (_s, b) => {
       const bullet = b as Sprite;
@@ -2402,10 +2617,14 @@ export class GameScene extends Phaser.Scene implements EnemyWorld, BossHost {
   explodeDrum(drum: Sprite) {
     if (!drum.active || drum.getData('lit')) return;
     drum.setData('lit', true);
-    this.drumsDetonated += 1;
+    const mine = drum.getData('mine') === true;
+    if (!mine) this.drumsDetonated += 1;
     const { x, y } = drum;
     const demo = this.hasPerk('demolitionist');
-    const radius = demo ? BARREL.radius * 1.4 : BARREL.radius;
+    const baseRadius = (drum.getData('radius') as number | undefined) ?? BARREL.radius;
+    const radius = demo ? baseRadius * 1.4 : baseRadius;
+    const enemyMax = (drum.getData('enemyDamage') as number | undefined) ?? BARREL.enemyDamage;
+    const playerMax = (drum.getData('playerDamage') as number | undefined) ?? BARREL.playerDamage;
     drum.destroy();
     this.sfx('explosion', x, y);
     this.sparks.explode(40, x, y);
@@ -2423,7 +2642,7 @@ export class GameScene extends Phaser.Scene implements EnemyWorld, BossHost {
     // Copy the list: killing an enemy removes it from the group mid-loop.
     for (const e of [...this.enemies.getChildren()] as Sprite[]) {
       if (!e.active || isHacked(e)) continue;
-      const dmg = blastDamage(Phaser.Math.Distance.Between(x, y, e.x, e.y), BARREL.enemyDamage, radius);
+      const dmg = blastDamage(Phaser.Math.Distance.Between(x, y, e.x, e.y), enemyMax, radius);
       if (dmg <= 0) continue;
       if (!ENEMY_STATS[kindOf(e)].solid) {
         const a = Phaser.Math.Angle.Between(x, y, e.x, e.y);
@@ -2442,7 +2661,7 @@ export class GameScene extends Phaser.Scene implements EnemyWorld, BossHost {
       if (pt.getData('alive') && Phaser.Math.Distance.Between(x, y, pt.x, pt.y) < radius) this.boss?.breakPart(pt);
     }
     // Demolitionists know where to stand.
-    const toYou = demo ? 0 : blastDamage(Phaser.Math.Distance.Between(x, y, this.player.x, this.player.y), BARREL.playerDamage, radius);
+    const toYou = demo ? 0 : blastDamage(Phaser.Math.Distance.Between(x, y, this.player.x, this.player.y), playerMax, radius);
     if (toYou > 0) this.hurtPlayer(toYou);
 
     // Cracked walls in the blast give way.
@@ -2467,8 +2686,14 @@ export class GameScene extends Phaser.Scene implements EnemyWorld, BossHost {
     return this.stats.perk?.id === id;
   }
 
-  private addPickup(x: number, y: number, kind: 'oxygen' | 'salvage' | 'datalog' | 'medkit' | 'overdrive' | 'aegis', value: number) {
-    const texture = kind === 'oxygen' && this.isRobot ? 'battery' : kind === 'medkit' && this.isRobot ? 'repairkit' : kind;
+  private addPickup(
+    x: number,
+    y: number,
+    kind: 'oxygen' | 'salvage' | 'datalog' | 'medkit' | 'overdrive' | 'aegis',
+    value: number,
+    look?: string,
+  ) {
+    const texture = look ?? (kind === 'oxygen' && this.isRobot ? 'battery' : kind === 'medkit' && this.isRobot ? 'repairkit' : kind);
     const item = this.pickups.create(x, y, texture) as Sprite;
     item.setDepth(5).setData({ kind, value });
     this.tweens.add({ targets: item, y: y - 2, yoyo: true, repeat: -1, duration: 600 });

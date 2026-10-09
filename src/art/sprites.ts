@@ -488,6 +488,74 @@ export const BRUTE: PixelSprite = {
   rows: BRUTE_ROWS,
 };
 
+// ------------------------------------------------------------------ v1.0: mining hauler
+
+const SAPPER_ROWS = [
+  '..............',
+  '..kkkk..kkkk..',
+  '..kttk..kttk..',
+  '.kkyyyyyyyykk.',
+  '.kyYYYYYYYyyk.',
+  '.kyYccccccYyk.',
+  'kkyYcrrrrcYyGk',
+  'kkyYcrRRrcYyGg',
+  'kkyYcrrrrcYyGk',
+  '.kyYccccccYyk.',
+  '.kyyyyyyyyyyk.',
+  '.kkyyyyyyyykk.',
+  '..kttk..kttk..',
+  '..kkkk..kkkk..',
+];
+const SAPPER_BASE = { k: '#120d06', y: '#b8741c', Y: '#e8a33a', c: '#2b2418', t: '#3a3328', G: '#7b8494', g: '#c8d0dc' };
+/** Sapper: a tracked mining bot carrying charges. Two frames: the sensor blinks. */
+export const SAPPER_FRAMES: PixelSprite[] = [
+  { palette: { ...SAPPER_BASE, r: '#ff3b4e', R: '#ffd0d5' }, rows: SAPPER_ROWS },
+  { palette: { ...SAPPER_BASE, r: '#8e1f2c', R: '#ff3b4e' }, rows: SAPPER_ROWS },
+];
+
+const SWEEPER_ROWS = [
+  '................',
+  '.....kkkkkk.....',
+  '...kkmmmmmmkk...',
+  '..kmMMMMMMMMmk..',
+  '.kmMMbbbbbbMMmk.',
+  '.kmMbbccccbbMmkk',
+  'kmMbbcllllcbbMLL',
+  'kmMbbclwwlcbbMLW',
+  'kmMbbclwwlcbbMLW',
+  'kmMbbcllllcbbMLL',
+  '.kmMbbccccbbMmkk',
+  '.kmMMbbbbbbMMmk.',
+  '..kmMMMMMMMMmk..',
+  '...kkmmmmmmkk...',
+  '.....kkkkkk.....',
+  '................',
+];
+const SWEEPER_BASE = { k: '#0d1117', m: '#3a3f48', M: '#5a6270', b: '#2b2f38', c: '#14171c' };
+/** Sweeper turntable seen from above, emitter on the right. Frame 0 hostile (orange), 1 hacked (cyan). */
+export const SWEEPER_FRAMES: PixelSprite[] = [
+  { palette: { ...SWEEPER_BASE, l: '#ff7b3a', w: '#ffe0b0', L: '#ff9a3c', W: '#fff2d0' }, rows: SWEEPER_ROWS },
+  { palette: { ...SWEEPER_BASE, l: '#2fb8c9', w: '#d8faff', L: '#5ef2ff', W: '#e0fbff' }, rows: SWEEPER_ROWS },
+];
+
+const MINE_ROWS = ['..kkkk..', '.kmmmmk.', 'kmmrrmmk', 'kmrRRrmk', 'kmrRRrmk', 'kmmrrmmk', '.kmmmmk.', '..kkkk..'];
+/** Proximity mine: frame 0 dim (arming or idle blink), frame 1 lit. */
+export const MINE_FRAMES: PixelSprite[] = [
+  { palette: { k: '#0d0b08', m: '#4a4236', r: '#5a1a20', R: '#8e1f2c' }, rows: MINE_ROWS },
+  { palette: { k: '#0d0b08', m: '#4a4236', r: '#ff3b4e', R: '#ffd0d5' }, rows: MINE_ROWS },
+];
+
+export const GRENADE: PixelSprite = {
+  palette: { k: '#0d0b08', g: '#5b6b3a', G: '#8a9b5c', y: '#ffd166' },
+  rows: ['..y..', '.kkk.', 'kgGgk', 'kggGk', '.kkk.'],
+};
+
+/** Ore chunk dropped from a cut vein: worth salvage like any other. */
+export const ORE_CHUNK: PixelSprite = {
+  palette: { k: '#120d06', r: '#5a4a3a', R: '#7d6a55', o: '#ffb347', O: '#ffe0a0' },
+  rows: ['..kkkk..', '.kRRrrk.', 'kRoOrrrk', 'kRooRrok', 'krrRRoOk', 'krorrrrk', '.krrrrk.', '..kkkk..'],
+};
+
 // ------------------------------------------------------------------ tileset
 
 export interface TileTheme {
@@ -495,6 +563,8 @@ export interface TileTheme {
   remap: Record<string, string>;
   /** Replace hazard stripes with alien growth. */
   bio: boolean;
+  /** Mining haulers: cracked walls are ore veins, and the floor has rubble instead of stripes. */
+  ore?: boolean;
 }
 
 export const FREIGHTER_THEME: TileTheme = { remap: {}, bio: false };
@@ -525,6 +595,36 @@ export const RESEARCH_THEME: TileTheme = {
     '#4b5875': '#4a6d60',
     '#0f131c': '#0d1512',
     '#151a26': '#131d19',
+  },
+};
+
+/** Mining haulers: rusty ochre plating, amber lights, rock rubble, ore veins in the cracked walls. */
+export const MINING_THEME: TileTheme = {
+  bio: false,
+  ore: true,
+  remap: {
+    '#1d2433': '#2a2219',
+    '#29324a': '#3a2f22',
+    '#131824': '#1a140e',
+    '#38445f': '#55432e',
+    '#222a3b': '#2e251b',
+    '#2d3750': '#3d3123',
+    '#1b2130': '#211a13',
+    '#2a3349': '#382c20',
+    '#4b5d80': '#7a5c36',
+    '#34435d': '#4d3b28',
+    '#56698f': '#ffb347',
+    '#2a374e': '#3a2d1f',
+    '#6f86ad': '#c99a5a',
+    '#1a2130': '#1d1610',
+    '#171c28': '#1e1811',
+    '#0a0d14': '#0d0a06',
+    '#3a4560': '#56442f',
+    '#10141e': '#140f0a',
+    '#2f3a52': '#433423',
+    '#4b5875': '#6b5236',
+    '#0f131c': '#120e09',
+    '#151a26': '#18130d',
   },
 };
 
@@ -564,8 +664,19 @@ export function paintTileset(ctx: CanvasRenderingContext2D, theme: TileTheme = F
   ox = S;
   floorBase();
 
-  // 2 — weak wall: cracked bulkhead, hazard stripes, glowing seams
+  // 2 — weak wall: cracked bulkhead, hazard stripes, glowing seams (or an ore vein)
   ox = S * 2;
+  if (theme.ore) {
+    px(0, 0, '#3a3029', S, S);
+    px(0, 0, '#4d4036', S, 1);
+    const rocks: [number, number, number, number, string][] = [
+      [1, 2, 5, 4, '#4a3d33'], [8, 1, 6, 5, '#544538'], [2, 9, 6, 5, '#4f4134'], [10, 8, 5, 6, '#463a30'],
+    ];
+    for (const [x, y, w, h, c] of rocks) px(x, y, c, w, h);
+    const ore: Pixel[] = [[4, 4], [5, 5], [6, 5], [7, 6], [8, 7], [9, 7], [10, 8], [6, 10], [7, 10], [11, 4], [12, 3], [3, 12]];
+    for (const [x, y] of ore) px(x, y, '#ffb347');
+    for (const [x, y] of [[5, 4], [8, 6], [12, 4], [7, 11]] as Pixel[]) px(x, y, '#ffe0a0');
+  } else {
   px(0, 0, '#45434c', S, S);
   px(0, 0, '#5a5864', S, 1);
   for (let i = 0; i < S; i += 4) {
@@ -575,6 +686,7 @@ export function paintTileset(ctx: CanvasRenderingContext2D, theme: TileTheme = F
   const crack: Pixel[] = [[3, 5], [4, 6], [5, 6], [6, 7], [7, 8], [8, 8], [9, 9], [10, 10], [11, 10], [12, 11], [7, 9], [6, 10], [5, 11], [9, 7], [10, 6]];
   for (const [x, y] of crack) px(x, y, '#ff9a3c');
   for (const [x, y] of crack) px(x + 1, y, '#15151a');
+  }
 
   // 3 — open space
   ox = S * 3;
@@ -627,6 +739,12 @@ export function paintTileset(ctx: CanvasRenderingContext2D, theme: TileTheme = F
       [11, 10, 1, 1, '#9be36b'], [12, 4, 2, 2, '#24481f'], [12, 4, 1, 1, '#57a83c'],
     ];
     for (const [x, y, w, h, c] of growth) px(x, y, c, w, h);
+  } else if (theme.ore) {
+    const rubble: [number, number, number, number, string][] = [
+      [3, 4, 3, 2, '#4f4134'], [4, 3, 1, 1, '#6b5a48'], [10, 9, 4, 3, '#4f4134'], [11, 9, 2, 1, '#6b5a48'],
+      [6, 11, 2, 2, '#463a30'], [12, 3, 2, 2, '#463a30'], [7, 6, 1, 1, '#ffb347'],
+    ];
+    for (const [x, y, w, h, c] of rubble) px(x, y, c, w, h);
   } else {
     for (let y = 11; y < 15; y++) {
       for (let x = 1; x < S - 1; x++) px(x, y, (x + y) % 4 < 2 ? '#c9961a' : '#1a1a1a');

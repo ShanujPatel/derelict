@@ -13,7 +13,7 @@ export const BOUNTY = {
 } as const;
 
 /** Kinds that can carry a bounty: things that move and fight. */
-export const BOUNTY_KINDS: readonly EnemyKind[] = ['drone', 'crawler', 'spitter'];
+export const BOUNTY_KINDS: readonly EnemyKind[] = ['drone', 'crawler', 'spitter', 'sapper'];
 
 const NAMES = [
   'RUSTJAW',

@@ -12,7 +12,7 @@ export const SCALES = {
   wholeTone: [0, 2, 4, 6, 8, 10],
 } as const;
 
-export type ThemeId = 'hub' | 'freighter' | 'research';
+export type ThemeId = 'hub' | 'freighter' | 'research' | 'mining';
 
 export interface MusicTheme {
   /** MIDI note of the drone. */
@@ -33,6 +33,8 @@ export const THEMES: Record<ThemeId, MusicTheme> = {
   hub: { root: 45, scale: SCALES.minorPent, bpm: 72, melodyOctave: 2, density: 0.18, melodyWave: 'sine', combat: false, seed: 'hub' },
   freighter: { root: 38, scale: SCALES.dorian, bpm: 96, melodyOctave: 2, density: 0.22, melodyWave: 'triangle', combat: true, seed: 'freighter' },
   research: { root: 37, scale: SCALES.phrygian, bpm: 84, melodyOctave: 3, density: 0.16, melodyWave: 'sine', combat: true, seed: 'research' },
+  /** Mining haulers: low, heavy and square-edged, like machinery in a rock hold. */
+  mining: { root: 36, scale: SCALES.minorPent, bpm: 104, melodyOctave: 2, density: 0.2, melodyWave: 'square', combat: true, seed: 'mining' },
 };
 
 export const midiToFreq = (midi: number): number => 440 * 2 ** ((midi - 69) / 12);

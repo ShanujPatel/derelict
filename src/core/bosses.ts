@@ -1,11 +1,11 @@
 import type { ShipType } from './types';
 
 /**
- * Boss contracts: two bosses, each fought in its own arena (see arena.ts).
+ * Boss contracts: three bosses, each fought in its own arena (see arena.ts).
  * Pure numbers and rules here; the fights themselves live in scenes/boss.ts.
  */
-export type BossId = 'foreman' | 'mother';
-export const BOSS_IDS: readonly BossId[] = ['foreman', 'mother'];
+export type BossId = 'foreman' | 'mother' | 'captain';
+export const BOSS_IDS: readonly BossId[] = ['foreman', 'mother', 'captain'];
 
 export interface BossDef {
   id: BossId;
@@ -51,6 +51,21 @@ export const BOSSES: Record<BossId, BossDef> = {
       'Her core is only exposed while her mouth is open to spit. Hit it then.',
       'Three feeder roots heal her. Shoot or torch them; they grow back if you wait.',
       'Drums beside her hit straight through the carapace.',
+    ],
+  },
+  captain: {
+    id: 'captain',
+    name: 'THE HOLLOW CAPTAIN',
+    title: 'Rook Brannick, Gravecutter',
+    ship: 'mining',
+    arena: 'Ore hold 4',
+    hp: 90,
+    firstKillReward: 240,
+    blurb: 'The Gravecutter captain, wired into stolen AI cores. A deflector shield turns your shots away.',
+    tips: [
+      'Three pylons power his shield. Break all three and it drops for a few seconds.',
+      'Use the grav tool on his grenades to throw them back: they hit him through the shield.',
+      'Drum blasts get through too. In phase two he blinks around and calls raiders.',
     ],
   },
 };
@@ -151,6 +166,42 @@ export function ringAngles(count: number, offset = 0): number[] {
   return Array.from({ length: count }, (_, i) => offset + (i / count) * Math.PI * 2);
 }
 
+// ---------------------------------------------------------------- the Hollow Captain
+
+export const CAPTAIN = {
+  pylons: 3,
+  pylonHp: 6,
+  /** Breaking every pylon drops the shield for this long; then they reboot. */
+  shieldDownMs: 7000,
+  walkSpeed: [44, 60] as const,
+  /** He keeps his distance: backs off inside the first, closes in beyond the second. */
+  range: [100, 170] as const,
+  burstEveryMs: [2600, 1900] as const,
+  burstShots: [4, 6] as const,
+  burstDamage: 7,
+  bulletSpeed: 230,
+  grenadeEveryMs: [5600, 4000] as const,
+  grenades: [1, 3] as const,
+  /** A grenade flies for this long, then sits on its warning circle for the fuse. */
+  grenadeFlightMs: 900,
+  grenadeFuseMs: 500,
+  grenadeRadius: 34,
+  grenadeDamage: 20,
+  /** His own grenade landing on him (thrown back with the grav tool) ignores the shield. */
+  grenadeSelfDamage: 9,
+  /** Phase 2: blinks to a new spot, and calls in raiders. */
+  blinkEveryMs: 7000,
+  raiderEveryMs: 11000,
+  maxRaiders: 2,
+  blastDamage: 8,
+  contactDamage: 14,
+} as const;
+
+/** Damage a hit on the Captain does: nothing while his shield is up. */
+export function captainDamage(amount: number, s: { shielded: boolean }): number {
+  return s.shielded ? 0 : amount;
+}
+
 // ---------------------------------------------------------------- records
 
 export interface BossRecord {
@@ -162,6 +213,7 @@ export interface BossRecord {
 export const emptyBossRecords = (): Record<BossId, BossRecord> => ({
   foreman: { kills: 0, bestMs: 0 },
   mother: { kills: 0, bestMs: 0 },
+  captain: { kills: 0, bestMs: 0 },
 });
 
 /** Seed for a boss contract run: random, but marked so the arena knows which boss. */

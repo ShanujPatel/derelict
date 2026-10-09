@@ -163,10 +163,21 @@ Opt-in runs from the DAILY tab (unlocked after 3 extractions; the Bloom Mother a
 
 ## 9e. Hall of fame (v0.9)
 
-- Shown in the hub's own **RANKS** tab (between DAILY and LOG).
+- Shown in the hub's own **RANKS** tab (between DAILY and LOG) as one table from `get_hall_table`: a row per player, a column per stat, sorted by total salvage banked by default; tapping a heading re-sorts (boss times fastest first). Rank and name are sticky so the 19 stat columns scroll sideways on phones. Top 25 plus your own row.
 - One `player_totals` row per claimed player, updated by `submit_run` at the end of every run (not assist mode). Lost runs add kills, elites, bounties and run count; extractions also add salvage banked, best haul, deepest dive and boss best times.
 - 19 boards: banked, haul, extractions, depth, streak (computed from consecutive `daily_scores` days), foreman, mother (fastest first), kills, elite, bounty, and one per hostile type. Top 20 plus your own row.
 - Anti-cheat limits live in `src/core/hallOfFame.ts` (client) and `submit_run` (server).
+
+## 9f. The Saw-Tooth (v1.0)
+
+- **Mining hauler** (`mining`): 66×50, up to 10 rooms of 7–13 tiles, 14 thin-wall shortcuts plus 9 rock ore veins (own stream `:ore`; floor on exactly one side, so cutting makes an alcove). Spawns: 4 drones, 5 sappers, 3 sweepers (centre of rooms ≥7×7, never the exit room), 6 drums, 1 shock floor. Ore veins drop 7–15 salvage (× condition). Unlock: log c2-01 or 6 extractions.
+- **Sapper**: HP 3, keeps 70–130 px, lays a mine every 2.6 s (max 3 out). **Mine**: arms 0.7 s, triggers within 22 px, 0.38 s fuse, radius 38, 22 damage to you, 5 to hostiles, fizzles after 20 s; it's a drum underneath, so shots and blasts set it off.
+- **Sweeper**: HP 9, solid; beam 120 px stopped by walls, 0.9 rad/s (1.5 once it has seen you), 16 damage; hacked, it burns hostiles for 1 every 0.35 s.
+- **The Hollow Captain**: HP 90; shield while any of 3 pylons (HP 6) stands; all down = 7 s window, then reboot. Bursts of 4/6 shots, grenades 1/3 (0.9 s flight, 0.5 s fuse, radius 34, 20 damage; 9 to him if they land on him); grav tool returns grenades. Phase 2: blink every 7 s, up to 2 raiders.
+- **Weekly board**: `weekly_scores`, best per player per ISO week; limits 2,500 salvage, 18/s, 60 attempts.
+- **Ghosts**: `G1.<interval>.<base64url>`: start position (int16 ×2) then int8 dx/dy per 100 ms sample; capped at 6,000 samples (≤24,000 chars). Stored only against the exact score and time on the board.
+- **Seed explorer**: `map.html`, core modules only (no Phaser).
+- **App**: manifest, icons, service worker (network-first pages, cache-first hashed assets, `ignoreVary`).
 
 ## 10. Art and audio
 
@@ -219,7 +230,8 @@ Each version is a tagged GitHub release with notes.
 | **v0.7** ✅ | Boss contracts: the Foreman and the Bloom Mother in handcrafted three-part arenas |
 | **v0.8** ✅ | Deep salvage: gamepad, deep dive, weekly challenge, streaks, arc caster, sentry, 3 perks, mimics, stalkers, shock floors, bounties, combos, codex chapter 2, run history, tips, field manual, assist mode, trophy cosmetics, share card |
 | **v0.9** ✅ | All-time hall of fame: salvage, records, boss times, kills by hostile type |
-| **Later** | Codex chapter 3; more ship types; more bosses; online weekly board |
+| **v1.0** ✅ | The Saw-Tooth: mining haulers, the Hollow Captain, codex chapter 3, weekly board, ghosts, seed explorer, installable offline app, faster loading |
+| **Later** | Codex chapter 4 (the survey ship Caldera); ghost races against friends; more bosses |
 
 ## 13. Open questions
 

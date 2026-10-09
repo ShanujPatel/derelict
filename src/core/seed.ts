@@ -42,8 +42,13 @@ export interface ResolvedSeed {
   carry?: Carry;
 }
 
-/** The Daily Derelict alternates ship types by date, the same for everyone. */
+/** From this day the Daily Derelict rotates through all three ship types (earlier days keep theirs). */
+export const MINING_DAILY_FROM = '2026-10-12';
+
+/** The Daily Derelict picks a ship type from the date, the same for everyone. */
 export function dailyShip(seed: string): ShipType {
+  const day = seed.replace(/^daily-/, '');
+  if (day >= MINING_DAILY_FROM) return (['freighter', 'research', 'mining'] as const)[hashString(seed) % 3];
   return hashString(seed) % 2 === 0 ? 'freighter' : 'research';
 }
 

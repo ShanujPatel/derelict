@@ -20,22 +20,46 @@ export interface Room {
   h: number;
 }
 
-export type ShipType = 'freighter' | 'research';
+export type ShipType = 'freighter' | 'research' | 'mining';
 
-export const SHIP_TYPES: readonly ShipType[] = ['freighter', 'research'];
+export const SHIP_TYPES: readonly ShipType[] = ['freighter', 'research', 'mining'];
 
 /**
  * Hostiles: drones and turrets on freighters, aliens on research vessels,
- * and Gravecutter rivals (raider, brute) who board mid-run on any ship.
+ * mining sappers and sweeper lasers on mining haulers (v1.0), and Gravecutter
+ * rivals (raider, brute) who board mid-run on any ship.
  */
-export type EnemyKind = 'drone' | 'turret' | 'crawler' | 'spitter' | 'egg' | 'raider' | 'brute' | 'mimic' | 'stalker';
+export type EnemyKind =
+  | 'drone'
+  | 'turret'
+  | 'crawler'
+  | 'spitter'
+  | 'egg'
+  | 'raider'
+  | 'brute'
+  | 'mimic'
+  | 'stalker'
+  | 'sapper'
+  | 'sweeper';
 /** Things to pick up or open. */
 export type ItemKind = 'oxygen' | 'salvage' | 'cache' | 'datalog' | 'medkit' | 'overdrive' | 'aegis';
 /** Hazards: explosive fuel drums (v0.6). */
 export type HazardKind = 'drum';
 export type SpawnKind = EnemyKind | ItemKind | HazardKind;
 
-export const ENEMY_KINDS: readonly EnemyKind[] = ['drone', 'turret', 'crawler', 'spitter', 'egg', 'raider', 'brute', 'mimic', 'stalker'];
+export const ENEMY_KINDS: readonly EnemyKind[] = [
+  'drone',
+  'turret',
+  'crawler',
+  'spitter',
+  'egg',
+  'raider',
+  'brute',
+  'mimic',
+  'stalker',
+  'sapper',
+  'sweeper',
+];
 
 export interface Spawn extends Point {
   kind: SpawnKind;

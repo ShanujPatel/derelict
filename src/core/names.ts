@@ -55,6 +55,7 @@ export const isPlaceholderName = (name: string) => /^SALVAGER-\d{4}$/.test(name)
 
 const VESSELS = {
   freighter: { prefix: 'CSV', names: ['ATLAS', 'BRIGAND', 'CALLISTO', 'DUSKWARD', 'EMBERLINE', 'GRANITE', 'HARROWGATE', 'IRONSIDE', 'KESTREL', 'LODESTAR', 'MERIDIAN', 'NORTHWIND', 'OBELISK', 'RAMPART', 'STOCKTON', 'TITAN', 'VANGUARD', 'WAYFARER'] },
+  mining: { prefix: 'MH', names: ['BEDROCK', 'COALSACK', 'DEEP SEAM', 'FLINTLOCK', 'GALENA', 'HEMATITE', 'IRONJAW', 'MOTHERLODE', 'OREBODY', 'PICKAXE', 'QUARRY', 'SLAGHEAP', 'TAILINGS', 'TUNGSTEN', 'WOLFRAM', 'BASALT'] },
   research: { prefix: 'RV', names: ['AURELIA', 'CASSINI', 'DAEDALUS', 'EUROPA', 'HYPATIA', 'KEPLER', 'NOETHER', 'ORPHEUS', 'PANDORA', 'SELENE', 'THEIA', 'VESALIUS', 'ZENITH', 'MERIAN', 'SOMERVILLE', 'FARADAY'] },
 } as const;
 

@@ -1,4 +1,5 @@
 import Phaser from 'phaser';
+import { MINE, SWEEPER } from '../core/fieldkit';
 import { RIVAL_CARRY_LIMIT } from '../core/rivals';
 import type { SfxName } from '../core/sfx';
 import type { EnemyKind, Point } from '../core/types';
@@ -31,6 +32,10 @@ export const ENEMY_STATS: Record<EnemyKind, EnemyStats> = {
   /** Freighters only: sits looking like a salvage crate until you get close. */
   mimic: { hp: 4, contactDamage: 14, solid: false, speed: 76, sight: 160, drop: [1, 20, 35], radius: 5, offset: 0, shadowY: 0 },
   brute: { hp: 8, contactDamage: 16, solid: false, speed: 48, sight: 200, drop: [1, 10, 18], radius: 6, offset: 2, shadowY: 8 },
+  /** Mining haulers: keeps its distance and lays proximity mines behind it. */
+  sapper: { hp: 3, contactDamage: 8, solid: false, speed: 70, sight: 170, drop: [0.5, 4, 10], radius: 5, offset: 2, shadowY: 7 },
+  /** Mining haulers: a cutting laser on a turntable, sweeping its room. Hack it to turn the beam on hostiles. */
+  sweeper: { hp: 9, contactDamage: 0, solid: true, speed: 0, sight: 160, drop: [1, 8, 14], radius: 7, offset: 1, shadowY: 0 },
 };
 
 /** Enemies that use walking routes rather than flying straight at you. */
@@ -65,6 +70,10 @@ export interface EnemyWorld {
   steal(e: Sprite, pickup: Sprite): void;
   /** Plays a sound effect at a world position. */
   soundAt(name: SfxName, x: number, y: number): void;
+  /** A sapper drops a proximity mine where it stands. */
+  layMine(e: Sprite): void;
+  /** How many of this sapper's mines are still out. */
+  minesOf(e: Sprite): number;
 }
 
 export const kindOf = (e: Sprite) => e.getData('kind') as EnemyKind;
@@ -84,6 +93,7 @@ export function updateEnemy(e: Sprite, world: EnemyWorld, time: number) {
   }
 
   if (kind === 'turret') return updateTurret(e, world, time, stats);
+  if (kind === 'sweeper') return updateSweeper(e, world, time, stats);
   // Mimics ignore line of sight while dormant: they only wake when you're right next to them.
   if (kind === 'mimic') {
     return updateMimic(e, world, time, stats, Phaser.Math.Distance.Between(e.x, e.y, world.player.x, world.player.y));
@@ -130,6 +140,29 @@ export function updateEnemy(e: Sprite, world: EnemyWorld, time: number) {
 
     case 'raider':
       return updateRaider(e, world, time, stats, dist, sees);
+
+    case 'sapper': {
+      if (!alert) {
+        wander(e, time, 24);
+        faceVelocity(e);
+        return;
+      }
+      // Keep a middle distance, sidestepping, and leave mines in your path.
+      const a = Phaser.Math.Angle.Between(e.x, e.y, p.x, p.y);
+      if (dist > 130) world.moveTowards(e, p, stats.speed);
+      else if (dist < 70) e.setVelocity(-Math.cos(a) * stats.speed * 1.2, -Math.sin(a) * stats.speed * 1.2);
+      else {
+        const side = (e.getData('side') as number) ?? 1;
+        e.setVelocity(Math.cos(a + (Math.PI / 2) * side) * stats.speed * 0.7, Math.sin(a + (Math.PI / 2) * side) * stats.speed * 0.7);
+        if (time > (e.getData('flipAt') ?? 0)) e.setData({ side: -side, flipAt: time + Phaser.Math.Between(1200, 2200) });
+      }
+      faceVelocity(e);
+      if (time > (e.getData('nextMine') ?? 0) && world.minesOf(e) < MINE.maxPerSapper && dist < 200) {
+        e.setData('nextMine', time + MINE.layEveryMs);
+        world.layMine(e);
+      }
+      return;
+    }
 
     case 'stalker': {
       // Cloaked: a faint shimmer, until it's within striking range or has been hit.
@@ -189,6 +222,21 @@ export function wakeMimic(e: Sprite, world: EnemyWorld, time: number) {
   e.setVelocity(Math.cos(a) * 190, Math.sin(a) * 190);
   e.scene.tweens.add({ targets: e, scaleX: 1.3, scaleY: 1.3, yoyo: true, duration: 110 });
   world.soundAt('hatch', e.x, e.y);
+}
+
+/** Sweeper: turns its beam steadily; faster once it has seen you. GameScene draws the beam and applies hits. */
+function updateSweeper(e: Sprite, world: EnemyWorld, time: number, stats: EnemyStats) {
+  const last = (e.getData('lastTick') as number | undefined) ?? time;
+  e.setData('lastTick', time);
+  const seconds = Math.min(0.1, (time - last) / 1000);
+  const p = world.player;
+  const sees =
+    !isHacked(e) && Phaser.Math.Distance.Between(e.x, e.y, p.x, p.y) < stats.sight && world.canSee(e, p);
+  if (sees) e.setData('angryUntil', time + 3000);
+  const speed = time < (e.getData('angryUntil') ?? 0) ? SWEEPER.angrySpeed : SWEEPER.turnSpeed;
+  const spin = (e.getData('spin') as number | undefined) ?? 1;
+  e.setData('beam', ((e.getData('beam') as number | undefined) ?? 0) + spin * speed * seconds);
+  e.setRotation(e.getData('beam') as number);
 }
 
 function updateTurret(e: Sprite, world: EnemyWorld, time: number, stats: EnemyStats) {

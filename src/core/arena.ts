@@ -30,7 +30,7 @@ export const DOOR: readonly Point[] = [
   { x: 22, y: 11 },
 ];
 
-export type FeatureKind = 'coupling' | 'root';
+export type FeatureKind = 'coupling' | 'root' | 'pylon';
 
 export interface ArenaFeature extends Point {
   kind: FeatureKind;
@@ -105,12 +105,12 @@ export function generateArena(seed: string, boss: BossId): ArenaDeck {
   put(14, 45, 'medkit', 35);
   put(29, 45, 'oxygen', 35);
   scatter(SECTIONS.staging, 'salvage', 3, [6, 16]);
-  const guard = ship === 'freighter' ? 'drone' : 'crawler';
-  for (const x of ship === 'freighter' ? [15, 28] : [15, 21, 28]) put(x, 39, guard);
+  const guard = ship === 'freighter' ? 'drone' : ship === 'mining' ? 'sapper' : 'crawler';
+  for (const x of ship === 'research' ? [15, 21, 28] : [15, 28]) put(x, 39, guard);
 
   // The arena itself.
   const features: ArenaFeature[] = [];
-  const bossSpawn = { x: 21, y: ship === 'freighter' ? 18 : 16 };
+  const bossSpawn = { x: 21, y: ship === 'research' ? 16 : ship === 'mining' ? 19 : 18 };
   const reserve = (x: number, y: number) => taken.add(`${x},${y}`);
   for (let dy = -2; dy <= 2; dy++) for (let dx = -1; dx <= 2; dx++) reserve(bossSpawn.x + dx, bossSpawn.y + dy);
   if (ship === 'freighter') {
@@ -119,6 +119,13 @@ export function generateArena(seed: string, boss: BossId): ArenaDeck {
       reserve(x, y);
     }
     for (const [x, y] of [[5, 21], [38, 21], [5, 25], [38, 25]]) put(x, y, 'drum');
+  } else if (ship === 'mining') {
+    // Shield pylons in a wide triangle, so you have to cross the hold to reach them all.
+    for (const [x, y] of [[8, 15], [35, 15], [21, 31]]) {
+      features.push({ x, y, kind: 'pylon' });
+      reserve(x, y);
+    }
+    for (const [x, y] of [[5, 22], [38, 22], [17, 25], [26, 25]]) put(x, y, 'drum');
   } else {
     for (const [x, y] of [[13, 20], [30, 20], [21, 27]]) {
       features.push({ x, y, kind: 'root' });

@@ -3,6 +3,7 @@ import { DOOR, SECTIONS, generateArena, openDoor } from '../src/core/arena';
 import {
   BOSSES,
   BOSS_IDS,
+  CAPTAIN,
   FOREMAN,
   MOTHER,
   bossPhase,
@@ -69,7 +70,10 @@ describe('boss arenas', () => {
       it('have the right weak points', () => {
         const a = generateArena('W', boss);
         if (boss === 'foreman') expect(a.features.filter((f) => f.kind === 'coupling')).toHaveLength(FOREMAN.couplings);
+        else if (boss === 'captain') expect(a.features.filter((f) => f.kind === 'pylon')).toHaveLength(CAPTAIN.pylons);
         else expect(a.features.filter((f) => f.kind === 'root')).toHaveLength(MOTHER.roots);
+        // Every weak point stands on open floor.
+        for (const f of a.features) expect(a.tiles[f.y][f.x]).toBe(1);
         expect(a.ship).toBe(BOSSES[boss].ship);
       });
     });
@@ -145,6 +149,7 @@ describe('boss contracts in the save', () => {
     expect(sanitizeSave({ ...s, bosses: { mother: { kills: 'lots' } } }).bosses).toEqual({
       foreman: { kills: 0, bestMs: 0 },
       mother: { kills: 0, bestMs: 0 },
+      captain: { kills: 0, bestMs: 0 },
     });
     expect(sanitizeSave({}).bosses.foreman).toEqual({ kills: 0, bestMs: 0 });
   });

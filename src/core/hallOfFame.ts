@@ -15,6 +15,7 @@ export type BoardId =
   | 'streak'
   | 'foreman'
   | 'mother'
+  | 'captain'
   | 'kills'
   | 'elite'
   | 'bounty'
@@ -26,13 +27,17 @@ export type BoardId =
   | 'raider'
   | 'brute'
   | 'mimic'
-  | 'stalker';
+  | 'stalker'
+  | 'sapper'
+  | 'sweeper';
 
 export type BoardGroup = 'Salvage' | 'Records' | 'Bosses' | 'Kills';
 
 export interface BoardDef {
   id: BoardId;
   label: string;
+  /** Column heading in the RANKS table. */
+  short: string;
   group: BoardGroup;
   /** How a value reads, e.g. "1,240 salvage", "Depth 4", "2:31". */
   format: (value: number) => string;
@@ -42,25 +47,28 @@ const n = (v: number) => v.toLocaleString('en-GB');
 const kills = (v: number) => `${n(v)} destroyed`;
 
 export const BOARDS: BoardDef[] = [
-  { id: 'banked', label: 'Total salvage banked', group: 'Salvage', format: (v) => `${n(v)} salvage` },
-  { id: 'haul', label: 'Biggest single haul', group: 'Salvage', format: (v) => `${n(v)} salvage` },
-  { id: 'extractions', label: 'Ships cleared (extractions)', group: 'Records', format: (v) => `${n(v)} ships` },
-  { id: 'depth', label: 'Deepest dive', group: 'Records', format: (v) => `Depth ${v}` },
-  { id: 'streak', label: 'Longest daily streak', group: 'Records', format: (v) => `${v} day${v === 1 ? '' : 's'}` },
-  { id: 'foreman', label: 'Fastest Foreman kill', group: 'Bosses', format: (v) => formatDuration(v) },
-  { id: 'mother', label: 'Fastest Bloom Mother kill', group: 'Bosses', format: (v) => formatDuration(v) },
-  { id: 'kills', label: 'All hostiles', group: 'Kills', format: kills },
-  { id: 'elite', label: 'Elites', group: 'Kills', format: kills },
-  { id: 'bounty', label: 'Bounties', group: 'Kills', format: (v) => `${n(v)} claimed` },
-  { id: 'drone', label: 'Patrol drones', group: 'Kills', format: kills },
-  { id: 'turret', label: 'Wall turrets', group: 'Kills', format: kills },
-  { id: 'mimic', label: 'Mimic crates', group: 'Kills', format: kills },
-  { id: 'crawler', label: 'Crawlers', group: 'Kills', format: kills },
-  { id: 'stalker', label: 'Stalkers', group: 'Kills', format: kills },
-  { id: 'spitter', label: 'Spitters', group: 'Kills', format: kills },
-  { id: 'egg', label: 'Egg sacs', group: 'Kills', format: kills },
-  { id: 'raider', label: 'Gravecutter raiders', group: 'Kills', format: kills },
-  { id: 'brute', label: 'Gravecutter brutes', group: 'Kills', format: kills },
+  { id: 'banked', short: 'Banked', label: 'Total salvage banked', group: 'Salvage', format: (v) => `${n(v)} salvage` },
+  { id: 'haul', short: 'Best haul', label: 'Biggest single haul', group: 'Salvage', format: (v) => `${n(v)} salvage` },
+  { id: 'extractions', short: 'Ships', label: 'Ships cleared (extractions)', group: 'Records', format: (v) => `${n(v)} ships` },
+  { id: 'depth', short: 'Depth', label: 'Deepest dive', group: 'Records', format: (v) => `Depth ${v}` },
+  { id: 'streak', short: 'Streak', label: 'Longest daily streak', group: 'Records', format: (v) => `${v} day${v === 1 ? '' : 's'}` },
+  { id: 'foreman', short: 'Foreman', label: 'Fastest Foreman kill', group: 'Bosses', format: (v) => formatDuration(v) },
+  { id: 'mother', short: 'Mother', label: 'Fastest Bloom Mother kill', group: 'Bosses', format: (v) => formatDuration(v) },
+  { id: 'captain', short: 'Captain', label: 'Fastest Hollow Captain kill', group: 'Bosses', format: (v) => formatDuration(v) },
+  { id: 'kills', short: 'Kills', label: 'All hostiles', group: 'Kills', format: kills },
+  { id: 'elite', short: 'Elites', label: 'Elites', group: 'Kills', format: kills },
+  { id: 'bounty', short: 'Bounties', label: 'Bounties', group: 'Kills', format: (v) => `${n(v)} claimed` },
+  { id: 'drone', short: 'Drones', label: 'Patrol drones', group: 'Kills', format: kills },
+  { id: 'turret', short: 'Turrets', label: 'Wall turrets', group: 'Kills', format: kills },
+  { id: 'mimic', short: 'Mimics', label: 'Mimic crates', group: 'Kills', format: kills },
+  { id: 'sapper', short: 'Sappers', label: 'Sappers', group: 'Kills', format: kills },
+  { id: 'sweeper', short: 'Lasers', label: 'Sweeper lasers', group: 'Kills', format: kills },
+  { id: 'crawler', short: 'Crawlers', label: 'Crawlers', group: 'Kills', format: kills },
+  { id: 'stalker', short: 'Stalkers', label: 'Stalkers', group: 'Kills', format: kills },
+  { id: 'spitter', short: 'Spitters', label: 'Spitters', group: 'Kills', format: kills },
+  { id: 'egg', short: 'Eggs', label: 'Egg sacs', group: 'Kills', format: kills },
+  { id: 'raider', short: 'Raiders', label: 'Gravecutter raiders', group: 'Kills', format: kills },
+  { id: 'brute', short: 'Brutes', label: 'Gravecutter brutes', group: 'Kills', format: kills },
 ];
 
 export const BOARD_IDS = BOARDS.map((b) => b.id);
@@ -111,4 +119,22 @@ export interface HallEntry {
   callsign: string;
   value: number;
   isYou: boolean;
+}
+
+/** Boss times rank fastest first; everything else highest first. */
+export const fastestFirst = (id: BoardId) => id === 'foreman' || id === 'mother' || id === 'captain';
+
+/** One player's row in the RANKS table: every stat, null where there's none (boss times). */
+export interface HallRow {
+  rank: number;
+  callsign: string;
+  isYou: boolean;
+  values: Record<BoardId, number | null>;
+}
+
+/** A table cell: just the number (or time), with a dash for nothing. */
+export function formatCell(id: BoardId, value: number | null): string {
+  if (value === null || value <= 0) return '—';
+  if (fastestFirst(id)) return formatDuration(value);
+  return value.toLocaleString('en-GB');
 }

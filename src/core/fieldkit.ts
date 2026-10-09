@@ -106,7 +106,7 @@ export const BARREL = {
   playerDamage: 30,
   /** Barrels in the blast go off this long afterwards, for chain reactions. */
   chainDelayMs: 140,
-  count: { freighter: 4, research: 3 },
+  count: { freighter: 4, research: 3, mining: 6 },
   minDistance: 6,
 } as const;
 
@@ -139,7 +139,7 @@ export const SHOCK = {
   /** Enemies on a live patch take this much every tick. */
   enemyDamage: 1,
   enemyTickMs: 450,
-  count: { freighter: 2, research: 1 },
+  count: { freighter: 2, research: 1, mining: 1 },
 } as const;
 
 export type ShockState = 'off' | 'warn' | 'on';
@@ -165,6 +165,80 @@ export const SENTRY = {
   cost: 6,
   cooldownMs: 1500,
 } as const;
+
+// ---------------------------------------------------------------- mining hauler (v1.0)
+
+/** Proximity mines that sappers lay behind them. */
+export const MINE = {
+  /** Blinks for this long before it can go off. */
+  armMs: 700,
+  /** Goes off when you (not other hostiles) come this close. */
+  triggerRadius: 22,
+  /** Short beep between triggering and the blast: one roll gets you clear. */
+  fuseMs: 380,
+  radius: 38,
+  playerDamage: 22,
+  enemyDamage: 5,
+  /** Fizzles out if nobody steps on it. */
+  lifetimeMs: 20000,
+  /** A sapper lays one this often while it's hunting you, and keeps this many at most. */
+  layEveryMs: 2600,
+  maxPerSapper: 3,
+} as const;
+
+/** Sweeper: a mining laser on a turntable that sweeps a beam round its room. */
+export const SWEEPER = {
+  /** Radians per second; it speeds up while it can see you. */
+  turnSpeed: 0.9,
+  angrySpeed: 1.5,
+  beamLength: 120,
+  /** How close to the beam counts as touching it. */
+  beamWidth: 6,
+  damage: 16,
+  /** A hacked sweeper hurts hostiles instead, this much per tick. */
+  hackedDamage: 1,
+  hackedTickMs: 350,
+} as const;
+
+/** Ore veins: the cracked walls on mining haulers hold ore worth salvage when cut. */
+export const ORE = {
+  value: [7, 15] as [number, number],
+} as const;
+
+/**
+ * Where a beam from (x, y) stops: at its full length, or at the first wall
+ * (or weak wall) tile it meets. Steps along in small increments, which is
+ * plenty for a 16-pixel grid.
+ */
+export function beamEnd(
+  grid: Tile[][],
+  x: number,
+  y: number,
+  angle: number,
+  length: number,
+  tileSize = 16,
+): { x: number; y: number } {
+  const dx = Math.cos(angle);
+  const dy = Math.sin(angle);
+  let last = { x, y };
+  for (let d = 0; d <= length; d += 3) {
+    const px = x + dx * d;
+    const py = y + dy * d;
+    const t = grid[Math.floor(py / tileSize)]?.[Math.floor(px / tileSize)];
+    if (t === undefined || t === Tile.Wall || t === Tile.WeakWall) return last;
+    last = { x: px, y: py };
+  }
+  return { x: x + dx * length, y: y + dy * length };
+}
+
+/** Shortest distance from a point to the segment a–b. */
+export function distanceToSegment(px: number, py: number, ax: number, ay: number, bx: number, by: number): number {
+  const vx = bx - ax;
+  const vy = by - ay;
+  const len2 = vx * vx + vy * vy;
+  const t = len2 === 0 ? 0 : Math.max(0, Math.min(1, ((px - ax) * vx + (py - ay) * vy) / len2));
+  return Math.hypot(px - (ax + t * vx), py - (ay + t * vy));
+}
 
 // ---------------------------------------------------------------- scanner map
 

@@ -14,9 +14,9 @@ The game works without this; the DAILY tab just shows your personal best. These 
 2. Paste the whole of [`docs/supabase.sql`](supabase.sql) and click **Run**.
 3. You should see *Success. No rows returned*. Running it again later is safe and keeps existing scores.
 
-This creates three locked-down tables (daily scores, player names and all-time totals) and five functions. Browsers can't read or write the tables directly: they can only call `submit_score` (which checks every daily run), `claim_callsign` (which reserves a unique name), `get_daily_board` (which never reveals player ids), `submit_run` (which adds a finished run to your all-time totals) and `get_hall_of_fame` (which ranks one all-time board).
+This creates four locked-down tables (daily scores, weekly scores, player names and all-time totals) and ten functions. Browsers can't read or write the tables directly: they can only call `submit_score` (which checks every daily run), `claim_callsign` (which reserves a unique name), `get_daily_board` (which never reveals player ids), `submit_run` (which adds a finished run to your all-time totals) `get_hall_of_fame` (which ranks one all-time stat), `get_hall_table` (the RANKS table: every stat for each player, sorted by the column you pick), `submit_weekly` and `get_weekly_board` (the Weekly Challenge board), and `submit_ghost` and `get_daily_ghost` (the path of each player's best daily run, for others to race).
 
-**Updating from an older version:** paste and run the latest `docs/supabase.sql` again whenever it changes. v0.5.1 added unique names; until you re-run it, the game can't reserve names and posting a score fails. v0.9 added the hall of fame; until you re-run it, the hall of fame shows an error and runs aren't counted (the daily board still works).
+**Updating from an older version:** paste and run the latest `docs/supabase.sql` again whenever it changes. v0.5.1 added unique names; until you re-run it, the game can't reserve names and posting a score fails. v0.9 added the hall of fame; until you re-run it, the hall of fame shows an error and runs aren't counted (the daily board still works). **v1.0** added the weekly board, ghosts and mining haulers: until you re-run it, mining-hauler dailies (from 12 October 2026) can't be posted, the weekly board shows an error, and runs with sappers, sweepers or the Hollow Captain aren't counted in the hall of fame.
 
 ## 3. Copy the project URL and publishable key
 
@@ -50,6 +50,8 @@ Checks happen in the browser (`src/core/leaderboard.ts`) and again in the databa
 - score between 0 and 1,500 salvage, run length at least 20 seconds, and no more than 12 salvage per second
 - names are 3–16 letters, numbers, spaces, `-` or `_`, and unique: each player reserves one, nobody can post under a name someone else holds, and the board always shows a player's current name
 - one row per player per day keeps only their best; at most 30 submissions a day
+- weekly runs: this ISO week's seed only (or last week's, just after midnight on Sunday), at least 20 seconds, at most 2,500 salvage and 18 per second (mutators make salvage richer), 60 submissions a week
+- ghosts: at most 24,000 characters in the game's own format, and only stored against the exact score and time already on the daily board, so a ghost can't replace a better run
 - hall of fame runs need a claimed name and must be 10 seconds to 3 hours long, depth 1–5, at most 1,500 salvage per depth and 12 per second, at most 400 kills of any one type and 2 kills per second overall, no more elites than kills, at most one bounty per deck, and a boss time inside the run; at most 200 runs per player a day
 
 It's a light, showcase-level defence: a determined cheater could still post a believable fake score. The SQL is tested against a real Postgres engine (PGlite) in `tests/supabase-sql.test.ts`, so it runs in CI on every push.
@@ -57,5 +59,6 @@ It's a light, showcase-level defence: a determined cheater could still post a be
 ## Good to know
 
 - Free Supabase projects pause after about a week with no activity. If the board says it's unreachable, open the Supabase dashboard and restore the project.
+- To wipe a week's board, run `delete from weekly_scores where week = '2026-W41';`.
 - To wipe the hall of fame, run `delete from player_totals;` in the SQL Editor.
 - To wipe a day's board, run `delete from daily_scores where day = '2026-10-09';` in the SQL Editor.

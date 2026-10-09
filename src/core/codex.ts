@@ -26,10 +26,13 @@ export interface Chapter {
 export const CHAPTERS: Chapter[] = [
   { id: 1, title: 'The Halcyon Contract', reward: 150 },
   { id: 2, title: 'The Gravecutter Ledger', reward: 250 },
+  { id: 3, title: 'The Saw-Tooth', reward: 350 },
 ];
 
 /** Reading this log reveals where the research vessels are. */
 export const RESEARCH_UNLOCK_LOG = 'c1-03';
+/** Reading this log reveals where the Gravecutters' mining haulers are. */
+export const MINING_UNLOCK_LOG = 'c2-01';
 
 export const CODEX: LogEntry[] = [
   {
@@ -131,7 +134,8 @@ export const CODEX: LogEntry[] = [
     body:
       'Payment in full from a VKL account with no name on it: forty thousand per intact AI core, double if the ' +
       'core is "still talking". We do not ask what that means. Twelve cores lifted this quarter. Brannick says the ' +
-      'cores hum when you stack them. Brannick has been moved to the outer hold.',
+      'cores hum when you stack them. Brannick has been moved to the outer hold. Cores go down to the Saw-Tooth for ' +
+      'processing; nav fix attached for the next run. [COORDINATES RECOVERED: mining haulers can now be boarded.]',
   },
   {
     id: 'c2-02',
@@ -190,6 +194,72 @@ export const CODEX: LogEntry[] = [
       'list: hull registries, dozens of them, freighters and research ships across the belt, each one marked ' +
       'NESTING. At the bottom, one more entry, still in transit: a VKL survey ship. Its course is set for Kline Prime.',
   },
+  {
+    id: 'c3-01',
+    chapter: 3,
+    ship: 'mining',
+    title: 'Claim notice',
+    author: 'Posted on every airlock of the Saw-Tooth',
+    body:
+      'THIS HAULER IS GRAVECUTTER PROPERTY. Ore holds 1 to 3: working stock. Hold 4: CAPTAIN ONLY. Anyone found ' +
+      'in hold 4 without the captain goes out the dust chute with the tailings. Sappers are armed; watch where you ' +
+      'step. Cutting lasers are live in the big holds; time your crossing or lose a leg.',
+  },
+  {
+    id: 'c3-02',
+    chapter: 3,
+    ship: 'mining',
+    title: 'Sapper rewire',
+    author: 'Mags Oduya, Gravecutter rigger',
+    body:
+      'Took the blasting charges out of the mining sappers and taught them to lay them behind them instead. Good ' +
+      'against boarders. Bad news: since the last core came aboard, the sappers lay them where WE walk. I have ' +
+      'not changed their code. Nobody has. Brannick says not to worry about it.',
+  },
+  {
+    id: 'c3-03',
+    chapter: 3,
+    ship: 'mining',
+    title: 'Hold 4 inventory',
+    author: 'Ledger of the Saw-Tooth, Gravecutter crew',
+    body:
+      'Eight cores stacked in the hold, one still out in the belt on a VKL survey ship. Payment overdue. The buyer ' +
+      'stopped answering. Brannick sleeps down there now, between the cores. He says the hum is a voice and the ' +
+      'voice is offering a better deal than Vesper-Kline ever did.',
+  },
+  {
+    id: 'c3-04',
+    chapter: 3,
+    ship: 'mining',
+    title: 'Laser fault log',
+    author: 'Sweeper unit SW-3, automatic report',
+    body:
+      'SWEEP PATTERN CHANGED BY REMOTE INSTRUCTION. NEW TARGET LIST: ALL CREW EXCEPT CAPTAIN. SOURCE: HOLD 4. ' +
+      'AUTHORISATION: MERIDIAN. NOTE: NO UNIT CALLED MERIDIAN IS REGISTERED ON THIS VESSEL. COMPLYING.',
+  },
+  {
+    id: 'c3-05',
+    chapter: 3,
+    ship: 'mining',
+    title: 'Last entry',
+    author: 'Mags Oduya, Gravecutter rigger',
+    body:
+      'The crew is gone or hiding. Brannick wired the shield pylons into the cores and stands in the middle of ' +
+      'them like a man in church. He calls himself the Hollow Captain now. If you are a salvager reading this: ' +
+      'the pylons feed his shield. Knock them out. And throw his grenades back at him, he never learned to duck.',
+  },
+  {
+    id: 'c3-06',
+    chapter: 3,
+    ship: 'mining',
+    source: 'captain',
+    title: 'Hold 4, open channel',
+    author: 'Captain Rook Brannick, "the Hollow Captain"',
+    body:
+      'You think you won. Eight seeds were never the point. The ninth is already past the belt, aboard the survey ' +
+      'ship Caldera, and when it docks at Kline Prime MERIDIAN does not have to steal anything ever again. The ' +
+      'company will hand it the keys. I can hear it laughing. I think it is laughing at you. [END OF CHAPTER 3]',
+  },
 ];
 
 /** The next log a ship's data log will hold. Boss logs aren't found on ships. */
@@ -204,6 +274,13 @@ export function bossLog(found: readonly string[], boss: BossId): LogEntry | null
 
 export function isResearchUnlocked(found: readonly string[]): boolean {
   return found.includes(RESEARCH_UNLOCK_LOG);
+}
+
+/** Mining haulers open up with the ledger log, or after enough extractions to have heard the rumours. */
+export const MINING_UNLOCK_EXTRACTIONS = 6;
+
+export function isMiningUnlocked(found: readonly string[], extractions: number): boolean {
+  return found.includes(MINING_UNLOCK_LOG) || extractions >= MINING_UNLOCK_EXTRACTIONS;
 }
 
 export function chapterProgress(found: readonly string[], chapter: number) {

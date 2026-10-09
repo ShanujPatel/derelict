@@ -888,6 +888,12 @@
     linear-gradient(180deg, #1a140a, #0f0b06);
 }
 
+.contract.theme-mining {
+  background:
+    radial-gradient(circle at 88% 18%, rgba(255, 179, 71, 0.18) 0 3px, transparent 4px),
+    linear-gradient(180deg, #1c150c, #0f0b06);
+}
+
 .contract.locked {
   filter: saturate(0.3);
 }
@@ -1003,7 +1009,7 @@
 .dest {
   grid-column: 1 / -1;
   display: grid;
-  grid-template-columns: 1fr 1fr;
+  grid-template-columns: 1fr 1fr 1fr;
   border: 1px solid var(--line);
 }
 
@@ -1060,6 +1066,17 @@
     radial-gradient(circle at 96% 62%, rgba(79, 216, 208, 0.3) 0 3px, transparent 4px),
     radial-gradient(ellipse at 50% 120%, rgba(79, 216, 208, 0.32), transparent 70%),
     linear-gradient(180deg, #0b1c18, #07110f);
+}
+
+.theme-mining {
+  --theme: #ffb347;
+  --theme-ink: #1a1006;
+  --theme-bg:
+    radial-gradient(circle at 90% 30%, rgba(255, 179, 71, 0.35) 0 2px, transparent 3px),
+    radial-gradient(circle at 80% 72%, rgba(255, 224, 160, 0.3) 0 2px, transparent 3px),
+    radial-gradient(circle at 95% 60%, rgba(255, 179, 71, 0.25) 0 3px, transparent 4px),
+    linear-gradient(160deg, transparent 0 62%, rgba(90, 74, 58, 0.45) 62% 64%, transparent 64%),
+    linear-gradient(180deg, #221a10, #120d07);
 }
 
 .btn.daily {
@@ -1133,7 +1150,8 @@
 }
 
 .daily-card.theme-freighter,
-.daily-card.theme-research {
+.daily-card.theme-research,
+.daily-card.theme-mining {
   background: var(--theme-bg);
   box-shadow: inset 0 0 0 1px var(--theme);
   border-color: transparent;
@@ -1270,78 +1288,155 @@
   }
 }
 
-/* Hall of fame */
-.hall-picker {
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-  margin-bottom: 10px;
-}
-
-.hall-group {
-  display: grid;
-  grid-template-columns: 5.5em 1fr;
-  gap: 8px;
-  align-items: start;
-}
-
-.hall-group-name {
-  color: var(--muted);
-  font-size: 11px;
-  letter-spacing: 0.12em;
-  text-transform: uppercase;
-  padding-top: 5px;
-}
-
-.hall-chips {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 4px;
-}
-
-.chip {
-  font: inherit;
-  font-size: 11px;
-  color: var(--muted);
-  background: var(--panel);
-  border: 1px solid var(--line);
-  padding: 4px 8px;
-  cursor: pointer;
-}
-
-.chip[aria-pressed='true'] {
-  color: var(--cyan);
-  border-color: var(--cyan);
-}
-
+/* Hall of fame: RANKS table */
 .hall-title {
   color: var(--cyan);
   font-size: 12px;
   letter-spacing: 0.1em;
   text-transform: uppercase;
-  margin-bottom: 6px;
+  margin-bottom: 2px;
 }
 
-.board.hall li {
-  grid-template-columns: 2.2em 1fr auto;
+.hall-hint {
+  margin: 0 0 8px;
 }
 
-.board.hall li .b-rank {
+.hall-scroll {
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+  touch-action: pan-x pan-y;
+  border: 1px solid var(--line);
+  background: var(--panel);
+  max-width: 100%;
+}
+
+.hall-table {
+  border-collapse: separate;
+  border-spacing: 0;
+  font-size: 12px;
+  white-space: nowrap;
+  min-width: 100%;
+}
+
+.hall-table th,
+.hall-table td {
+  padding: 7px 10px;
+  border-bottom: 1px solid var(--line);
+  text-align: left;
+}
+
+.hall-table thead th {
+  color: var(--muted);
+  font-weight: 400;
+  font-size: 10px;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  background: #0b111c;
+}
+
+.hall-table thead tr:first-child th {
+  padding-top: 5px;
+  padding-bottom: 3px;
+  border-bottom: 0;
+}
+
+.hall-table thead tr:first-child th[colspan] {
+  border-left: 1px solid var(--line);
+  color: #55627f;
+}
+
+.hall-table th.num button {
+  appearance: none;
+  background: none;
+  border: 0;
+  padding: 0;
+  font: inherit;
+  letter-spacing: inherit;
+  text-transform: inherit;
+  color: inherit;
+  cursor: pointer;
+}
+
+.hall-table th.num button:hover,
+.hall-table th.num button:focus-visible {
+  color: var(--text);
+}
+
+.hall-table .num {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+.hall-table th.sorted {
+  color: var(--cyan);
+  box-shadow: inset 0 -2px 0 var(--cyan);
+}
+
+.hall-table td.sorted {
+  color: var(--cyan);
+  background: rgba(111, 214, 255, 0.06);
+}
+
+.hall-table td.num:not(.sorted) {
+  color: #b4c0dc;
+}
+
+/* Rank and name stay put while the stats scroll sideways. */
+.hall-table .h-rank,
+.hall-table .h-name {
+  position: sticky;
+  z-index: 1;
+  background: #0d1420;
+}
+
+.hall-table .h-rank {
+  left: 0;
+  width: 2.4em;
+  min-width: 2.4em;
   color: var(--muted);
 }
 
-.board.hall li.top .b-rank {
+.hall-table .h-name {
+  left: 2.4em;
+  min-width: 8.5em;
+  max-width: 11em;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  border-right: 1px solid var(--line);
+}
+
+.hall-table thead .h-rank,
+.hall-table thead .h-name {
+  background: #0b111c;
+  z-index: 2;
+  vertical-align: bottom;
+}
+
+.hall-table tr.top .h-rank {
   color: var(--amber);
 }
 
-@media (max-width: 420px) {
-  .hall-group {
-    grid-template-columns: 1fr;
-    gap: 4px;
-  }
-  .hall-group-name {
-    padding-top: 0;
-  }
+.hall-table tr.you td {
+  background-color: rgba(255, 209, 102, 0.08);
+}
+
+.hall-table tr.you .h-rank,
+.hall-table tr.you .h-name {
+  background: #1d1e1d;
+}
+
+.hall-table tr.you .h-rank {
+  box-shadow: inset 2px 0 0 var(--amber);
+}
+
+.hall-table .h-name small {
+  color: var(--amber);
+  font-size: 9px;
+  letter-spacing: 0.12em;
+}
+
+.hall-table tbody tr:last-child td {
+  border-bottom: 0;
 }
 
 /* Six tabs: tighten the labels on narrow phones. */
@@ -1352,4 +1447,21 @@
     padding-left: 2px;
     padding-right: 2px;
   }
+}
+
+/* Weekly board on the weekly card. */
+.weekly-board-title {
+  margin: 12px 0 6px;
+  font-weight: 400;
+  font-size: 10px;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: #c9a0ff;
+}
+
+.h-what a,
+.hub-note a {
+  color: inherit;
+  text-decoration: underline dotted;
+  text-underline-offset: 3px;
 }

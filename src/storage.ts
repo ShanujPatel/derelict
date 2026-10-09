@@ -55,3 +55,36 @@ export function clearSave(): void {
     /* ignore */
   }
 }
+
+// ---------------------------------------------------------------- your own daily ghost
+
+const GHOST_KEY = 'derelict.ghost.v1';
+
+/** Your best daily run's path, kept locally so there's something to race offline. */
+export interface StoredGhost {
+  day: string;
+  score: number;
+  durationMs: number;
+  ghost: string;
+}
+
+export function loadOwnGhost(day: string): StoredGhost | null {
+  try {
+    const raw = JSON.parse(localStorage.getItem(GHOST_KEY) ?? 'null') as StoredGhost | null;
+    return raw && raw.day === day && typeof raw.ghost === 'string' ? raw : null;
+  } catch {
+    return null;
+  }
+}
+
+/** Keeps the ghost if it's the best run of the day so far (more salvage, then faster). */
+export function storeOwnGhost(g: StoredGhost): boolean {
+  const old = loadOwnGhost(g.day);
+  if (old && (old.score > g.score || (old.score === g.score && old.durationMs <= g.durationMs))) return false;
+  try {
+    localStorage.setItem(GHOST_KEY, JSON.stringify(g));
+    return true;
+  } catch {
+    return false;
+  }
+}

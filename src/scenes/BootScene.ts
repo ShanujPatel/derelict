@@ -27,6 +27,12 @@ import {
   FUEL_DRUM,
   REPAIR_KIT,
   SPARK,
+  SAPPER_FRAMES,
+  SWEEPER_FRAMES,
+  MINE_FRAMES,
+  GRENADE,
+  ORE_CHUNK,
+  MINING_THEME,
   TILE_SIZE,
   paintLight,
   paintTileset,
@@ -52,6 +58,9 @@ export class BootScene extends Phaser.Scene {
     makeSpriteSheet(this, 'cache', CACHE_FRAMES);
     makeSpriteSheet(this, 'mimic', MIMIC_FRAMES);
     makeSpriteSheet(this, 'stalker', STALKER_FRAMES);
+    makeSpriteSheet(this, 'sapper', SAPPER_FRAMES);
+    makeSpriteSheet(this, 'sweeper', SWEEPER_FRAMES);
+    makeSpriteSheet(this, 'mine', MINE_FRAMES);
     const singles: Record<string, PixelSprite> = {
       bullet: BULLET,
       flash: FLASH,
@@ -70,11 +79,14 @@ export class BootScene extends Phaser.Scene {
       datalog: DATALOG,
       raider: RAIDER,
       brute: BRUTE,
+      grenade: GRENADE,
+      ore: ORE_CHUNK,
     };
     for (const [key, sprite] of Object.entries(singles)) makeSpriteSheet(this, key, [sprite]);
 
     this.canvas('tiles-freighter', TILE_SIZE * DISPLAY_TILE_COUNT, TILE_SIZE, (ctx) => paintTileset(ctx, FREIGHTER_THEME));
     this.canvas('tiles-research', TILE_SIZE * DISPLAY_TILE_COUNT, TILE_SIZE, (ctx) => paintTileset(ctx, RESEARCH_THEME));
+    this.canvas('tiles-mining', TILE_SIZE * DISPLAY_TILE_COUNT, TILE_SIZE, (ctx) => paintTileset(ctx, MINING_THEME));
     this.canvas('light', 240, 240, (ctx) => paintLight(ctx, 120));
     this.canvas('light-small', 64, 64, (ctx) => paintLight(ctx, 32));
     this.canvas('shadow', 12, 5, (ctx) => {
@@ -111,6 +123,8 @@ export class BootScene extends Phaser.Scene {
     loop('crawler-run', 'crawler', 10);
     loop('stalker-run', 'stalker', 12);
     loop('egg-pulse', 'egg', 2);
+    loop('sapper-blink', 'sapper', 4);
+    loop('mine-blink', 'mine', 3);
 
     // A shared link (?seed= or ?daily) boards that ship straight away; otherwise start in the hub.
     const search = window.location.search;

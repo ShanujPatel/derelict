@@ -2,7 +2,21 @@
  * First-time tips: short hints shown once each, the first time the situation
  * comes up. Which ones you've seen is kept in the save.
  */
-export type TipId = 'salvage' | 'oxygen-low' | 'weak-wall' | 'hostile' | 'exit' | 'drum' | 'scanner' | 'datalog' | 'medkit' | 'shock' | 'lift';
+export type TipId =
+  | 'salvage'
+  | 'oxygen-low'
+  | 'weak-wall'
+  | 'hostile'
+  | 'exit'
+  | 'drum'
+  | 'scanner'
+  | 'datalog'
+  | 'medkit'
+  | 'shock'
+  | 'lift'
+  | 'sweeper'
+  | 'mine'
+  | 'ore';
 
 export type ControlScheme = 'keyboard' | 'touch' | 'pad';
 
@@ -50,6 +64,23 @@ export const TIPS: Record<TipId, Tip> = {
   },
   shock: { id: 'shock', text: 'Shock floor: it flickers, then goes live. Cross while it is dark, or roll over it. Crawlers fry on it too.' },
   medkit: { id: 'medkit', text: "Health pack. Walk over it when you're hurt; at full health it stays put for later." },
+  sweeper: {
+    id: 'sweeper',
+    text: {
+      keyboard: 'Cutting laser: its beam sweeps the room. Cross behind it, or roll through with Shift. Hack it and it burns hostiles instead.',
+      touch: 'Cutting laser: its beam sweeps the room. Cross behind it, or tap ROLL to go through. Hack it and it burns hostiles instead.',
+      pad: 'Cutting laser: its beam sweeps the room. Cross behind it, or roll through with A. Hack it and it burns hostiles instead.',
+    },
+  },
+  mine: { id: 'mine', text: 'Sapper mine: a blinking red light means armed. It goes off a moment after you get close, so keep moving, or shoot it from range.' },
+  ore: {
+    id: 'ore',
+    text: {
+      keyboard: 'Ore vein! Cut it open with your torch (F) for salvage. Drum blasts crack them too.',
+      touch: 'Ore vein! Cut it open with your TORCH for salvage. Drum blasts crack them too.',
+      pad: 'Ore vein! Cut it open with your torch (X) for salvage. Drum blasts crack them too.',
+    },
+  },
 };
 
 export const TIP_IDS = Object.keys(TIPS) as TipId[];

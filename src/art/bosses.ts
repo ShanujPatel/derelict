@@ -114,6 +114,41 @@ function root(ctx: Ctx, dead: boolean) {
   rect(ctx, 6, 3, 1, 1, '#e8ffb0');
 }
 
+/** The Hollow Captain: a Gravecutter in a heavy welding rig, cables trailing to the cores. Facing right. */
+function captain(ctx: Ctx, glow: string) {
+  // Cables
+  for (const [x, y] of [[1, 6], [1, 22], [2, 14]]) rect(ctx, x, y, 6, 2, '#2a2d33');
+  // Shoulders and rig
+  blob(ctx, 16, 15, 12, 12, '#120808');
+  blob(ctx, 16, 15, 11, 11, '#5a2b26');
+  blob(ctx, 14, 15, 9, 9, '#7d3a33');
+  // Chest plate with the saw-blade insignia
+  blob(ctx, 15, 15, 5, 5, '#3a3d45');
+  for (const [x, y] of [[15, 9], [21, 15], [15, 21], [9, 15], [19, 11], [19, 19], [11, 19], [11, 11]]) rect(ctx, x, y, 2, 2, '#e8b04a');
+  blob(ctx, 15.5, 15.5, 2.5, 2.5, glow);
+  // Helmet visor (front, right)
+  box(ctx, 22, 10, 5, 11, '#2b2f38');
+  rect(ctx, 23, 11, 3, 9, glow);
+  rect(ctx, 24, 12, 1, 3, '#ffffff');
+  // Rifle
+  box(ctx, 26, 21, 9, 3, '#9aa5b8');
+  rect(ctx, 26, 22, 9, 1, '#c9ced8');
+}
+
+function pylon(ctx: Ctx, dead: boolean) {
+  box(ctx, 2, 13, 10, 3, '#3a3f48');
+  box(ctx, 4, 2, 6, 11, '#4a5160');
+  rect(ctx, 5, 3, 4, 9, dead ? '#1a1a1a' : '#c06bff');
+  if (!dead) {
+    rect(ctx, 6, 4, 1, 6, '#f0d8ff');
+    rect(ctx, 3, 0, 8, 2, '#e0c0ff');
+  } else {
+    rect(ctx, 6, 5, 1, 2, '#ff7b3a');
+    rect(ctx, 7, 8, 1, 2, '#ff7b3a');
+    rect(ctx, 3, 0, 8, 2, '#3a3f48');
+  }
+}
+
 function bulkhead(ctx: Ctx) {
   rect(ctx, 0, 0, 32, 16, '#0d0f14');
   rect(ctx, 1, 1, 30, 14, '#3a3f48');
@@ -136,4 +171,8 @@ export const BOSS_TEXTURES: Record<string, { w: number; h: number; paint: (ctx: 
   root: { w: 14, h: 14, paint: (c) => root(c, false) },
   'root-dead': { w: 14, h: 14, paint: (c) => root(c, true) },
   bulkhead: { w: 32, h: 16, paint: bulkhead },
+  captain: { w: 36, h: 31, paint: (c) => captain(c, '#c06bff') },
+  'captain-exposed': { w: 36, h: 31, paint: (c) => captain(c, '#ff3b4e') },
+  pylon: { w: 14, h: 16, paint: (c) => pylon(c, false) },
+  'pylon-dead': { w: 14, h: 16, paint: (c) => pylon(c, true) },
 };
