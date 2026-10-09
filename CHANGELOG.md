@@ -1,5 +1,10 @@
 # Changelog
 
+## [1.2.1] - 2026-10-09
+
+- The training run is always on the first page: a compact TRAINING RUN row at the top of CREW once you've finished or skipped it.
+- Fixed: taps made while your name was still being checked online (skipping training, picking crew) could be undone when the check finished.
+
 ## [1.2.0] — Unreleased: Training
 
 ### Added

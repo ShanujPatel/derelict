@@ -875,7 +875,7 @@ export class GameScene extends Phaser.Scene implements EnemyWorld, BossHost {
             paid ? `+${TRAINING_REWARD} salvage for finishing training` : 'Training finished again: no reward this time.',
             'Spend salvage on upgrades back on your ship.',
           ]
-        : [reason || 'Training ended early.', '', 'Replay it any time from LOG → Field manual.'];
+        : [reason || 'Training ended early.', '', 'Replay it any time from the top of CREW.'];
       ui(this.add.text(w / 2, h / 2 - 16, lines.join('\n'), { ...FONT, fontSize: '10px', align: 'center', wordWrap: { width: w - 32 } }).setOrigin(0.5));
       const button = (y: number, label: string, onTap: () => void) =>
         ui(

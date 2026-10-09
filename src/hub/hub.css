@@ -1794,3 +1794,28 @@
 .training-card .btn:not(.ghost) {
   background: var(--green);
 }
+
+.training-card.compact {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding-top: 10px;
+  padding-bottom: 10px;
+}
+
+.training-card.compact b {
+  display: block;
+  font-weight: 400;
+  letter-spacing: 0.14em;
+  color: var(--green);
+}
+
+.training-card.compact span {
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.training-card.compact .btn {
+  flex: none;
+}

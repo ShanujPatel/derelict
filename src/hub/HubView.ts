@@ -192,9 +192,10 @@ export class HubView {
   /** Reserves the current name in the background; rolls a new one if it's been taken. */
   private checkName() {
     void ensureName(this.save, leaderboard).then(({ save, renamedFrom }) => {
-      if (save === this.save || !this.root.isConnected) return;
-      this.save = save;
-      this.callbacks.onSave(save);
+      if (!this.root.isConnected || (save.callsign === this.save.callsign && save.callsignClaimed === this.save.callsignClaimed)) return;
+      // Only the name came back from the network; keep anything the player changed meanwhile.
+      this.save = { ...this.save, callsign: save.callsign, callsignClaimed: save.callsignClaimed };
+      this.callbacks.onSave(this.save);
       this.render();
       if (renamedFrom) this.toast(`${renamedFrom} was taken. You're now ${save.callsign}`, true);
     });
@@ -312,7 +313,7 @@ export class HubView {
         return this.callbacks.onTraining?.();
       case 'skip-training':
         this.update(skipTraining(this.save));
-        return this.toast('You can play training any time from LOG → Field manual');
+        return this.toast('Training stays at the top of CREW whenever you want it');
       case 'clan-open-choice':
         this.clanForm.open = d.open === 'true';
         return this.render();
@@ -414,8 +415,8 @@ export class HubView {
         return this.toast(r.reason, true);
       }
       this.sound('buy');
-      this.save = r.save;
-      this.callbacks.onSave(r.save);
+      this.save = { ...this.save, callsign: r.save.callsign, callsignClaimed: r.save.callsignClaimed };
+      this.callbacks.onSave(this.save);
       this.board.at = 0;
       this.render();
       this.toast(r.offline ? `Name set to ${r.save.callsign}. We'll check it's free next time you're online` : `You're ${r.save.callsign}`);
@@ -612,7 +613,12 @@ export class HubView {
 
   /** For new players: an invitation to the training run, until they've played it or waved it off. */
   private trainingCard(): string {
-    if (this.save.tutorial !== 'new') return '';
+    if (this.save.tutorial !== 'new') {
+      return `<section class="card training-card compact">
+        <div><b>TRAINING RUN</b><span>${this.save.tutorial === 'done' ? 'Replay the guided ship any time' : `Learn the basics · +${TRAINING_REWARD} salvage`}</span></div>
+        <button class="btn ghost" data-action="training">PLAY ▸</button>
+      </section>`;
+    }
     return `<section class="card training-card">
       <div class="tc-head"><b>NEW TO DERELICT?</b><span>3 MINUTES</span></div>
       <p>Take the training run: a small guided ship that teaches you to move, grab salvage and air, shoot, roll, cut through walls, blow things up and get out alive. +${TRAINING_REWARD} salvage when you finish.</p>
