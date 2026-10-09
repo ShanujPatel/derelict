@@ -5,7 +5,7 @@ import type { WeaponId } from './weapons';
 export type CharacterId = 'salvager' | 'robot';
 export type StatId = 'health' | 'capacity' | 'speed';
 export type PerkId = 'scavenger' | 'cold-cutter' | 'scrapper' | 'second-wind';
-export type ToolId = 'torch' | 'hacker';
+export type ToolId = 'torch' | 'hacker' | 'grav';
 
 export interface CharacterDef {
   id: CharacterId;
@@ -119,6 +119,12 @@ export const TOOLS: Record<ToolId, ToolDef> = {
     name: 'Hacking tool',
     blurb: 'Turns turrets to your side and opens locked caches. Stand close and hold still.',
     cost: 160,
+  },
+  grav: {
+    id: 'grav',
+    name: 'Grav tool',
+    blurb: 'Cone-shaped push: shoves and stuns enemies, swats incoming shots aside.',
+    cost: 200,
   },
 };
 

@@ -17,6 +17,7 @@ import {
 } from './catalog';
 import { CHAPTERS, CODEX, chapterProgress, isResearchUnlocked } from './codex';
 import { SHIP_TYPES, type ShipType } from './types';
+import { cleanCallsign } from './leaderboard';
 import { hashString } from './seed';
 import { WEAPONS, type WeaponDef, type WeaponId } from './weapons';
 
@@ -35,6 +36,12 @@ export interface SaveData {
   codex: string[];
   /** Chapter rewards already paid out, e.g. 'chapter-1'. */
   rewards: string[];
+  /** Anonymous id for the leaderboard; set by storage on first load. */
+  playerId: string;
+  /** Leaderboard name. */
+  callsign: string;
+  /** Best extracted score on today's Daily Derelict. */
+  daily: { day: string; best: number };
   /** Bought cosmetics, as cosmeticKey() strings. Free options are always owned. */
   cosmetics: string[];
   upgrades: Record<StatId, number>;
@@ -75,6 +82,9 @@ export function defaultSave(): SaveData {
     tools: ['torch'],
     codex: [],
     rewards: [],
+    playerId: '',
+    callsign: '',
+    daily: { day: '', best: 0 },
     cosmetics: [],
     upgrades: { health: 0, capacity: 0, speed: 0 },
     loadout: {
@@ -216,6 +226,20 @@ export function setDestination(save: SaveData, ship: ShipType): SaveData {
   return next;
 }
 
+/** Sets the leaderboard callsign; returns the same save if the name isn't allowed. */
+export function setCallsign(save: SaveData, raw: string): SaveData {
+  const callsign = cleanCallsign(raw);
+  if (!callsign) return save;
+  return { ...clone(save), callsign };
+}
+
+/** Keeps the best extracted score for the given day. */
+export function recordDaily(save: SaveData, day: string, score: number): SaveData {
+  const next = clone(save);
+  next.daily = next.daily.day === day ? { day, best: Math.max(next.daily.best, score) } : { day, best: score };
+  return next;
+}
+
 export function setLook(save: SaveData, character: CharacterId, slot: 'body' | 'accent', id: string): SaveData {
   if (!owns(save, { kind: 'cosmetic', character, slot, id })) return save;
   const next = clone(save);
@@ -329,8 +353,15 @@ export function sanitizeSave(raw: unknown): SaveData {
     upgrades[id] = Math.min(num(up[id]), STATS[id].costs.length);
   }
 
+  const dailyRaw = isObj(raw.daily) ? raw.daily : {};
   const save: SaveData = {
     ...d,
+    playerId: typeof raw.playerId === 'string' && /^[0-9a-f-]{36}$/i.test(raw.playerId) ? raw.playerId : '',
+    callsign: typeof raw.callsign === 'string' ? (cleanCallsign(raw.callsign) ?? '') : '',
+    daily:
+      typeof dailyRaw.day === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(dailyRaw.day)
+        ? { day: dailyRaw.day, best: num(dailyRaw.best) }
+        : { day: '', best: 0 },
     credits: num(raw.credits),
     characters,
     weapons,

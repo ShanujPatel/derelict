@@ -17,14 +17,17 @@ import {
   tickOxygen,
   type OxygenState,
 } from '../core/oxygen';
-import { hasLineOfSight } from '../core/pathing';
-import { applyRunResult, computeRunStats, type RunStats, type SaveData } from '../core/progression';
+import { dayFromDailySeed } from '../core/leaderboard';
+import { findPath, hasLineOfSight, nearestByWalking } from '../core/pathing';
+import { GRAV_CONE, GRAV_RANGE, hitsShield, inGravCone, rivalEvent, type RivalEvent } from '../core/rivals';
+import { applyRunResult, computeRunStats, recordDaily, type RunStats, type SaveData } from '../core/progression';
 import { hashString, type ResolvedSeed } from '../core/seed';
 import { ENEMY_KINDS, Tile, type EnemyKind, type Point } from '../core/types';
 import { WEAPONS, pelletAngles, type WeaponDef } from '../core/weapons';
+import { leaderboard } from '../net/leaderboard';
 import { loadSave, storeSave } from '../storage';
 import { TouchControls } from '../ui/TouchControls';
-import { ENEMY_STATS, isHacked, kindOf, updateEnemy, type EnemyWorld } from './enemies';
+import { ENEMY_STATS, RIVAL_KINDS, isHacked, kindOf, updateEnemy, type EnemyWorld } from './enemies';
 
 type Sprite = Phaser.Physics.Arcade.Sprite;
 type Keys = Record<
@@ -34,6 +37,9 @@ type Keys = Record<
 
 const PLAYER_SPEED = 110;
 const TORCH_COST = 4;
+const GRAV_COST = 3;
+const TOOL_COOLDOWN = { torch: 300, hacker: 300, grav: 900 } as const;
+const TOOL_LABEL = { torch: 'TORCH', hacker: 'HACK', grav: 'GRAV' } as const;
 const SUFFOCATION_DPS = 6;
 const HACK_RANGE = 32;
 const HACK_BREAK_RANGE = 46;
@@ -101,6 +107,9 @@ export class GameScene extends Phaser.Scene implements EnemyWorld {
   private lastToolAt = 0;
   private invulnerableUntil = 0;
   private hack: Hack | null = null;
+  private runStartedAt = 0;
+  private rivals!: RivalEvent;
+  private rivalsArrived = false;
   private ended = false;
 
   constructor() {
@@ -125,6 +134,8 @@ export class GameScene extends Phaser.Scene implements EnemyWorld {
     this.lastToolAt = 0;
     this.invulnerableUntil = 0;
     this.hack = null;
+    this.rivals = rivalEvent(this.run.seed, this.run.ship);
+    this.rivalsArrived = false;
     this.ended = false;
     this.lamps = [];
     this.endScreen = [];
@@ -143,6 +154,7 @@ export class GameScene extends Phaser.Scene implements EnemyWorld {
     this.buildHud();
     this.showIntro();
 
+    this.runStartedAt = this.time.now;
     this.scale.on('resize', this.layout, this);
     this.events.once('shutdown', () => {
       this.scale.off('resize', this.layout, this);
@@ -248,7 +260,7 @@ export class GameScene extends Phaser.Scene implements EnemyWorld {
     this.keys = kb.addKeys('W,A,S,D,UP,LEFT,DOWN,RIGHT,Q,F,R,ENTER,ONE,TWO', false) as Keys;
     this.input.mouse?.disableContextMenu();
     this.input.on('wheel', () => this.switchWeapon());
-    this.touch = new TouchControls(this, this.stats.tool.id === 'hacker' ? 'HACK' : 'TORCH');
+    this.touch = new TouchControls(this, TOOL_LABEL[this.stats.tool.id]);
   }
 
   private setupCollisions() {
@@ -313,10 +325,13 @@ export class GameScene extends Phaser.Scene implements EnemyWorld {
 
   private showIntro() {
     const { width: w, height: h } = this.scale;
-    const hacker = this.stats.tool.id === 'hacker';
-    const toolHint = hacker ? 'hack turrets + locked caches (stay close)' : 'torch cracked walls';
+    const toolHint = {
+      torch: 'torch cracked walls',
+      hacker: 'hack turrets + locked caches (stay close)',
+      grav: 'grav pulse: shove + stun, block shots',
+    }[this.stats.tool.id];
     const help = this.touch.enabled
-      ? `Left thumb: move · right thumb: aim + fire\nGUN: swap · ${hacker ? 'HACK' : 'TORCH'}: ${toolHint}\nReach the green EXIT`
+      ? `Left thumb: move · right thumb: aim + fire\nGUN: swap · ${TOOL_LABEL[this.stats.tool.id]}: ${toolHint}\nReach the green EXIT`
       : `WASD move · mouse aim + fire · Q swap gun\nF / right-click: ${toolHint} · reach the green EXIT`;
     const title = this.run.ship === 'research' ? 'BOARDING RESEARCH VESSEL' : 'BOARDING DERELICT';
     const titleText = this.add
@@ -368,11 +383,53 @@ export class GameScene extends Phaser.Scene implements EnemyWorld {
     if (kind === 'turret') {
       e.setData('barrel', this.add.image(x, y, 'barrel').setOrigin(0.2, 0.5).setDepth(11));
     }
+    if (RIVAL_KINDS.includes(kind)) e.setData('loot', []);
     return e;
   }
 
   moveTowards(e: Sprite, target: Point, speed: number) {
     this.physics.moveTo(e, target.x, target.y, speed);
+  }
+
+  followPath(e: Sprite, target: Point, speed: number) {
+    const goal = this.tileAt(target.x, target.y);
+    const goalKey = `${goal.x},${goal.y}`;
+    let path = e.getData('path') as Point[] | undefined;
+    if (!path || this.time.now > (e.getData('pathAt') ?? 0) || e.getData('pathGoal') !== goalKey) {
+      path = findPath(this.grid, this.tileAt(e.x, e.y), goal, 3000) ?? [];
+      e.setData({ path, pathAt: this.time.now + 700, pathGoal: goalKey });
+    }
+    while (path.length && Phaser.Math.Distance.Between(e.x, e.y, toWorld(path[0]).x, toWorld(path[0]).y) < 4) path.shift();
+    const next = path.length ? toWorld(path[0]) : target;
+    this.physics.moveTo(e, next.x, next.y, speed);
+  }
+
+  nearestSalvage(e: Sprite): Sprite | null {
+    const loot = (this.pickups.getChildren() as Sprite[]).filter((p) => p.active && p.getData('kind') === 'salvage');
+    const best = nearestByWalking(this.grid, this.tileAt(e.x, e.y), loot.map((p) => this.tileAt(p.x, p.y)));
+    return best ? loot[best.index] : null;
+  }
+
+  steal(e: Sprite, pickup: Sprite) {
+    const loot = (e.getData('loot') as number[] | undefined) ?? [];
+    e.setData('loot', [...loot, pickup.getData('value') as number]);
+    this.floatText(pickup.x, pickup.y - 6, 'STOLEN', '#ff5a6a');
+    pickup.destroy();
+  }
+
+  private spawnRivals() {
+    this.rivalsArrived = true;
+    const start = toWorld(this.deck.start);
+    const offsets = [[-12, -8], [12, -8], [0, 10], [-12, 10], [12, 10]];
+    this.rivals.party.forEach((kind, i) => {
+      const [dx, dy] = offsets[i % offsets.length];
+      const e = this.spawnEnemy(kind, start.x + dx, start.y + dy);
+      e.setData({ loot: [], alertUntil: 0 });
+      e.setAlpha(0);
+      this.tweens.add({ targets: e, alpha: 1, duration: 600, delay: i * 150 });
+    });
+    this.cameras.main.shake(300, 0.01);
+    this.showBanner('GRAVECUTTERS DOCKING', 'Rival salvagers are after your loot', 0xff5a6a);
   }
 
   // ---------------------------------------------------------------- loop
@@ -383,6 +440,7 @@ export class GameScene extends Phaser.Scene implements EnemyWorld {
     const seconds = delta / 1000;
 
     this.updatePlayer(time);
+    if (!this.rivalsArrived && time - this.runStartedAt > this.rivals.arrivesAfter * 1000) this.spawnRivals();
     for (const e of this.enemies.getChildren() as Sprite[]) if (e.active) updateEnemy(e, this, time);
     this.updateHack(seconds);
 
@@ -441,9 +499,11 @@ export class GameScene extends Phaser.Scene implements EnemyWorld {
 
     const tool =
       Phaser.Input.Keyboard.JustDown(k.F) || t.consume('torch') || (!t.enabled && pointer.rightButtonDown());
-    if (tool && time > this.lastToolAt + 300) {
+    const toolId = this.stats.tool.id;
+    if (tool && time > this.lastToolAt + TOOL_COOLDOWN[toolId]) {
       this.lastToolAt = time;
-      if (this.stats.tool.id === 'hacker') this.startHack();
+      if (toolId === 'hacker') this.startHack();
+      else if (toolId === 'grav') this.useGrav(aim);
       else this.useTorch(aim);
     }
   }
@@ -502,6 +562,35 @@ export class GameScene extends Phaser.Scene implements EnemyWorld {
       this.cameras.main.shake(120, 0.006);
       this.floatText(w.x, w.y - 8, 'CUT', '#ffd166');
       return;
+    }
+  }
+
+  /** Grav pulse: shoves and stuns enemies in a cone and swats incoming shots aside. */
+  private useGrav(aim: number) {
+    const { x, y } = this.player;
+    this.oxygen = spendOxygen(this.oxygen, GRAV_COST);
+
+    const wave = this.add.graphics({ x, y }).setDepth(15);
+    wave.fillStyle(0x9f8cff, 0.3).slice(0, 0, GRAV_RANGE, aim - GRAV_CONE, aim + GRAV_CONE).fillPath();
+    wave.lineStyle(2, 0xc9bdff, 0.9).beginPath();
+    wave.arc(0, 0, GRAV_RANGE, aim - GRAV_CONE, aim + GRAV_CONE);
+    wave.strokePath();
+    wave.setScale(0.35);
+    this.tweens.add({ targets: wave, scale: 1, alpha: 0, duration: 280, onComplete: () => wave.destroy() });
+    this.cameras.main.shake(90, 0.005);
+
+    for (const e of this.enemies.getChildren() as Sprite[]) {
+      if (!e.active || isHacked(e) || ENEMY_STATS[kindOf(e)].solid || !inGravCone(x, y, aim, e.x, e.y)) continue;
+      const a = Phaser.Math.Angle.Between(x, y, e.x, e.y);
+      e.setVelocity(Math.cos(a) * 260, Math.sin(a) * 260);
+      e.setData({ stunnedUntil: this.time.now + 700, alertUntil: this.time.now + 4000 });
+      this.damageEnemy(e, 1);
+    }
+    for (const shot of this.hostileShots.getChildren() as Sprite[]) {
+      if (shot.active && inGravCone(x, y, aim, shot.x, shot.y)) {
+        this.sparks.explode(4, shot.x, shot.y);
+        shot.destroy();
+      }
     }
   }
 
@@ -581,13 +670,26 @@ export class GameScene extends Phaser.Scene implements EnemyWorld {
     const already = bullet.getData('hit') as Set<Sprite>;
     if (already.has(enemy)) return;
     already.add(enemy);
-    const hp = enemy.getData('hp') - bullet.getData('damage');
     const angle = Math.atan2(bullet.body!.velocity.y, bullet.body!.velocity.x);
-    if (!bullet.getData('pierce')) bullet.destroy();
+    const pierce = bullet.getData('pierce') as boolean;
+    const damage = bullet.getData('damage') as number;
+    if (kindOf(enemy) === 'brute' && hitsShield(enemy.rotation, angle, pierce)) {
+      // Deflected by the riot shield: flank it, stun it with the grav tool, or use the railgun.
+      this.sparks.explode(5, bullet.x, bullet.y);
+      bullet.destroy();
+      enemy.setData('alertUntil', this.time.now + 4000);
+      return;
+    }
+    if (!pierce) bullet.destroy();
+    if (!ENEMY_STATS[kindOf(enemy)].solid) enemy.setVelocity(Math.cos(angle) * 140, Math.sin(angle) * 140);
+    this.damageEnemy(enemy, damage);
+  }
+
+  private damageEnemy(enemy: Sprite, amount: number) {
+    const hp = (enemy.getData('hp') as number) - amount;
     enemy.setData({ hp, alertUntil: this.time.now + 4000 });
     enemy.setTintFill(0xffffff);
     this.time.delayedCall(60, () => enemy.active && enemy.clearTint());
-    if (!ENEMY_STATS[kindOf(enemy)].solid) enemy.setVelocity(Math.cos(angle) * 140, Math.sin(angle) * 140);
     if (hp <= 0) this.killEnemy(enemy);
   }
 
@@ -604,6 +706,11 @@ export class GameScene extends Phaser.Scene implements EnemyWorld {
     if (parent?.active) parent.setData('brood', Math.max(0, (parent.getData('brood') ?? 1) - 1));
     this.kills += 1;
 
+    const stolen = ((enemy.getData('loot') as number[] | undefined) ?? []).reduce((a, b) => a + b, 0);
+    if (stolen > 0) {
+      this.addPickup(enemy.x + 6, enemy.y, 'salvage', stolen);
+      this.floatText(enemy.x, enemy.y - 10, 'LOOT DROPPED', '#e8b04a');
+    }
     const [chance, min, max] = ENEMY_STATS[kind].drop;
     if (this.hasPerk('scrapper')) this.addPickup(enemy.x, enemy.y, 'salvage', Phaser.Math.Between(Math.max(min, 5), Math.max(max, 10)));
     else if (Math.random() < chance) this.addPickup(enemy.x, enemy.y, 'salvage', Phaser.Math.Between(min, max));
@@ -661,13 +768,16 @@ export class GameScene extends Phaser.Scene implements EnemyWorld {
     for (const b of this.banners) b.destroy();
     this.drawHud();
 
+    const durationMs = this.time.now - this.runStartedAt;
     const before = loadSave();
-    const after = applyRunResult(before, {
+    let after = applyRunResult(before, {
       extracted,
       salvage: this.salvage,
       dronesDestroyed: this.kills,
       logsFound: this.logsFound,
     });
+    const day = this.run.mode === 'daily' ? dayFromDailySeed(this.run.seed) : null;
+    if (day && extracted) after = recordDaily(after, day, this.salvage);
     storeSave(after);
     const bonus = after.rewards.length > before.rewards.length;
     const banked = after.credits - before.credits;
@@ -682,7 +792,7 @@ export class GameScene extends Phaser.Scene implements EnemyWorld {
     };
 
     ui(this.add.rectangle(w / 2, h / 2, w, h, 0x05070c, 0.82));
-    ui(
+    const title = ui(
       this.add
         .text(w / 2, h / 2 - 62, extracted ? 'EXTRACTED' : 'SIGNAL LOST', {
           ...FONT,
@@ -699,7 +809,9 @@ export class GameScene extends Phaser.Scene implements EnemyWorld {
     if (bonus) lines.push('Chapter complete! +bonus salvage');
     if (unlockedResearch) lines.push('NEW DESTINATION: research vessels');
     lines.push(`Ship's hold: ${after.credits}${bonus && !extracted ? ` (+${banked})` : ''}`);
-    ui(this.add.text(w / 2, h / 2 - 12, lines.join('\n'), { ...FONT, fontSize: '11px', align: 'center' }).setOrigin(0.5));
+    const summary = ui(this.add.text(w / 2, h / 2 - 12, lines.join('\n'), { ...FONT, fontSize: '11px', align: 'center' }).setOrigin(0.5));
+    // Keep the title clear of the summary however many lines it has.
+    title.setY(summary.y - summary.height / 2 - (extracted && day ? 34 : 18));
 
     const retry = () => this.scene.restart(this.run);
     const hub = () => {
@@ -730,6 +842,35 @@ export class GameScene extends Phaser.Scene implements EnemyWorld {
           })
           .on('pointerup', onTap),
       );
+
+    // Daily Derelict: post the score and show the rank when it comes back.
+    if (day && extracted) {
+      const status = ui(
+        this.add
+          .text(w / 2, summary.y - summary.height / 2 - 12, leaderboard.enabled ? 'Posting to daily board…' : `Today's best: ${after.daily.best}`, {
+            ...FONT,
+            fontSize: '10px',
+            color: '#6fd6ff',
+          })
+          .setOrigin(0.5),
+      );
+      if (leaderboard.enabled) {
+        leaderboard
+          .submit({
+            day,
+            seed: this.run.seed,
+            ship: this.run.ship,
+            callsign: after.callsign,
+            score: this.salvage,
+            kills: this.kills,
+            durationMs,
+            character: this.stats.character.id,
+            playerId: after.playerId,
+          })
+          .then((r) => status.active && status.setText(`DAILY RANK #${r.rank} of ${r.total} · best ${r.best}`))
+          .catch((e: Error) => status.active && status.setText(`Leaderboard: ${e.message}`).setColor('#ff9a3c'));
+      }
+    }
 
     // Short delay so a held trigger doesn't skip the results screen.
     const top = h / 2 + 22 + lines.length * 6;
@@ -775,7 +916,7 @@ export class GameScene extends Phaser.Scene implements EnemyWorld {
 
     this.salvageText.setText(`SALVAGE ${this.salvage}`);
     const guns = this.weapons.map((w, i) => (i === this.weaponIndex ? `[${w.name}]` : ` ${w.name} `)).join(' ');
-    this.weaponText.setText(`${guns}  · ${this.stats.tool.id === 'hacker' ? 'HACK' : 'TORCH'}`);
+    this.weaponText.setText(`${guns}  · ${TOOL_LABEL[this.stats.tool.id]}`);
 
     // Arrow round the player pointing at the extraction pad.
     const dist = Phaser.Math.Distance.Between(this.player.x, this.player.y, this.exitPad.x, this.exitPad.y);
@@ -795,11 +936,12 @@ export class GameScene extends Phaser.Scene implements EnemyWorld {
     );
   }
 
-  private showBanner(title: string, subtitle: string) {
+  private showBanner(title: string, subtitle: string, colour = 0x2fb6d6) {
     const { width: w } = this.scale;
-    const bg = this.add.rectangle(w / 2, 62, Math.min(w - 16, 300), 34, 0x06141a, 0.9).setStrokeStyle(1, 0x2fb6d6);
+    const css = `#${colour.toString(16).padStart(6, '0')}`;
+    const bg = this.add.rectangle(w / 2, 62, Math.min(w - 16, 300), 34, 0x06141a, 0.9).setStrokeStyle(1, colour);
     const text = this.add
-      .text(w / 2, 62, `${title}\n${subtitle}`, { ...FONT, fontSize: '10px', color: '#a8f0ff', align: 'center' })
+      .text(w / 2, 62, `${title}\n${subtitle}`, { ...FONT, fontSize: '10px', color: colour === 0x2fb6d6 ? '#a8f0ff' : css, align: 'center' })
       .setOrigin(0.5);
     for (const o of [bg, text]) {
       this.banners.push(o);

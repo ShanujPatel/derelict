@@ -134,7 +134,7 @@ Unlocks widen options rather than making runs trivially easy.
 | Build | Vite |
 | Tests | Vitest (RNG, map generator, game rules) |
 | CI/CD | GitHub Actions → lint, test, build, deploy to GitHub Pages |
-| Leaderboard | Supabase (Postgres + REST), added in v0.4 |
+| Leaderboard | Supabase: Postgres functions + RLS, plain `fetch` client, SQL tested with PGlite (v0.4) |
 | Save data | localStorage (unlocks, codex, settings) |
 
 **Code structure**
@@ -158,12 +158,12 @@ Each version is a tagged GitHub release with notes.
 | **v0.1.1** ✅ | Original pixel art pass, lighting, touch controls, portrait/landscape mobile |
 | **v0.2** ✅ | Robot character; customisation; Hub with permanent unlocks; save data |
 | **v0.3** ✅ | Research vessel + alien enemies; turrets; codex chapter 1; hacking tool; locked caches |
-| **v0.4** | Daily Derelict; online leaderboard; rival salvager events; grav tool |
+| **v0.4** ✅ | Online daily leaderboard (Supabase); Gravecutter rival boarding party (raiders + shielded brute); grav tool |
 | **Later** | Bosses; codex chapters 2–3; more ship types; gamepad polish; accessibility options |
 
 ## 13. Open questions
 
 - Final game name.
 - Single deck per run, or several decks with a lift between them?
-- Leaderboard anti-cheat level (server-side seed validation vs trust).
+- ~~Leaderboard anti-cheat level~~ Decided: light checks, enforced in both the client and the SQL.
 - Music: commission, CC0, or generate?

@@ -13,6 +13,8 @@ import {
 } from '../core/catalog';
 import { CHAPTERS, CODEX, chapterProgress } from '../core/codex';
 import { dailySeed, dailyShip } from '../core/seed';
+import { dayFromDailySeed, formatDuration, type BoardEntry } from '../core/leaderboard';
+import { leaderboard } from '../net/leaderboard';
 import type { ShipType } from '../core/types';
 import {
   canBoard,
@@ -27,6 +29,7 @@ import {
   setDestination,
   setGun,
   setLook,
+  setCallsign,
   setPerk,
   setTool,
   type SaveData,
@@ -34,12 +37,13 @@ import {
 } from '../core/progression';
 import { WEAPONS, type WeaponId } from '../core/weapons';
 
-type Tab = 'crew' | 'loadout' | 'upgrades' | 'log';
+type Tab = 'crew' | 'loadout' | 'upgrades' | 'daily' | 'log';
 
 const TABS: { id: Tab; label: string }[] = [
   { id: 'crew', label: 'CREW' },
   { id: 'loadout', label: 'LOADOUT' },
   { id: 'upgrades', label: 'UPGRADES' },
+  { id: 'daily', label: 'DAILY' },
   { id: 'log', label: 'LOG' },
 ];
 
@@ -60,6 +64,13 @@ export class HubView {
   private toastTimer = 0;
   private tab: Tab = 'crew';
   private confirmReset = false;
+  private board: { day: string; at: number; loading: boolean; entries: BoardEntry[] | null; error: string | null } = {
+    day: '',
+    at: 0,
+    loading: false,
+    entries: null,
+    error: null,
+  };
   private exportCode = '';
 
   constructor(
@@ -102,7 +113,7 @@ export class HubView {
   // ---------------------------------------------------------------- events
 
   private onKey = (e: KeyboardEvent) => {
-    if (e.key === 'Enter' && !(e.target instanceof HTMLTextAreaElement)) {
+    if (e.key === 'Enter' && !(e.target instanceof HTMLTextAreaElement) && !(e.target instanceof HTMLInputElement)) {
       e.preventDefault();
       this.callbacks.onLaunch(false);
     }
@@ -154,6 +165,16 @@ export class HubView {
         if (!canBoard(this.save, ship)) return this.toast('Find more crew logs to locate research vessels', true);
         return this.update(setDestination(this.save, ship));
       }
+      case 'callsign': {
+        const field = this.root.querySelector<HTMLInputElement>('[data-callsign]');
+        const next = setCallsign(this.save, field?.value ?? '');
+        if (next === this.save) return this.toast('3–16 letters, numbers, spaces, - or _', true);
+        this.update(next);
+        return this.toast(`Callsign set: ${next.callsign}`);
+      }
+      case 'refresh-board':
+        this.board.at = 0;
+        return this.render();
       case 'export':
         return this.doExport();
       case 'import':
@@ -221,6 +242,7 @@ export class HubView {
       crew: () => this.crewTab(),
       loadout: () => this.loadoutTab(),
       upgrades: () => this.upgradesTab(),
+      daily: () => this.dailyTab(),
       log: () => this.logTab(),
     };
     this.body.innerHTML = views[this.tab]();
@@ -243,7 +265,7 @@ export class HubView {
     this.root.querySelector('[data-dest]')!.innerHTML =
       option('freighter', 'FREIGHTER') + option('research', 'RESEARCH');
     const todays = dailyShip(dailySeed(new Date())) === 'research' ? 'research vessel' : 'freighter';
-    const daily = this.root.querySelector<HTMLElement>('[data-action="daily"]')!;
+    const daily = this.root.querySelector<HTMLElement>('.hub-launch [data-action="daily"]')!;
     daily.textContent = 'DAILY';
     daily.title = `Today's shared ship: a ${todays}`;
   }
@@ -404,6 +426,73 @@ export class HubView {
       <section class="hub-section"><h3>Systems</h3><div class="rows">${stats}</div></section>
       <section class="hub-section"><h3>Armoury</h3><div class="rows">${armoury}${toolRows}</div></section>
       <section class="hub-section"><h3>Perks</h3><div class="rows">${perks}</div></section>`;
+  }
+
+  private today(): string {
+    return dayFromDailySeed(dailySeed(new Date()))!;
+  }
+
+  /** Fetches the board at most every 30 s; re-renders when it arrives if the tab is still open. */
+  private loadBoard() {
+    const day = this.today();
+    const fresh = this.board.day === day && Date.now() - this.board.at < 30_000;
+    if (!leaderboard.enabled || this.board.loading || fresh) return;
+    this.board = { ...this.board, day, loading: true, error: null };
+    leaderboard
+      .board(day, this.save.playerId)
+      .then((entries) => (this.board = { day, at: Date.now(), loading: false, entries, error: null }))
+      .catch((e: Error) => (this.board = { day, at: Date.now(), loading: false, entries: null, error: e.message }))
+      .finally(() => this.tab === 'daily' && this.render());
+  }
+
+  private dailyTab(): string {
+    this.loadBoard();
+    const day = this.today();
+    const ship = dailyShip(dailySeed(new Date())) === 'research' ? 'Research vessel' : 'Freighter';
+    const date = new Date(`${day}T12:00:00Z`).toLocaleDateString('en-GB', { weekday: 'short', day: 'numeric', month: 'short' });
+    const best = this.save.daily.day === day ? this.save.daily.best : null;
+    const esc = (t: string) => t.replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[c]!);
+
+    let board: string;
+    if (!leaderboard.enabled) {
+      board = '<p class="hub-note">The online leaderboard isn\'t switched on for this build. Your best is still saved here.</p>';
+    } else if (this.board.error) {
+      board = `<p class="hub-note">Couldn't load the board: ${esc(this.board.error)}</p>
+        <div class="btn-row"><button class="btn ghost" data-action="refresh-board">TRY AGAIN</button></div>`;
+    } else if (!this.board.entries) {
+      board = '<p class="hub-note">Loading today\'s board…</p>';
+    } else if (this.board.entries.length === 0) {
+      board = '<p class="hub-note">No scores yet today. Extract and you\'re top of the board.</p>';
+    } else {
+      board = `<ol class="board">${this.board.entries
+        .map(
+          (r) => `<li class="${r.isYou ? 'you' : ''}">
+            <span class="b-rank">${r.rank}</span>
+            <span class="b-name">${esc(r.callsign)}${r.isYou ? ' <small>YOU</small>' : ''}</span>
+            <span class="b-score">${r.score}</span>
+            <span class="b-time">${formatDuration(r.durationMs)}</span>
+            <span class="b-crew" title="${esc(r.character)}">${r.character === 'robot' ? '⚙' : '◉'}</span>
+          </li>`,
+        )
+        .join('')}</ol>
+        <div class="btn-row"><button class="btn ghost" data-action="refresh-board">REFRESH</button></div>`;
+    }
+
+    return `
+      <section class="card daily-card">
+        <div class="daily-head"><span>${date.toUpperCase()}</span><b>${ship.toUpperCase()}</b></div>
+        <p class="hub-note">Same ship for everyone today. Extract to post your salvage; only your best run counts. Ties go to the faster run.</p>
+        <div class="daily-best">Your best today <b>${best ?? '—'}</b></div>
+        <div class="btn-row"><button class="btn launch" data-action="daily">PLAY TODAY'S DERELICT ▸</button></div>
+      </section>
+      <section class="hub-section"><h3>Top salvagers · ${day}</h3>${board}</section>
+      <section class="hub-section"><h3>Your callsign</h3>
+        <div class="callsign-row">
+          <input data-callsign maxlength="16" value="${esc(this.save.callsign)}" aria-label="Callsign" autocomplete="off" spellcheck="false" />
+          <button class="btn ghost" data-action="callsign">SAVE</button>
+        </div>
+        <p class="hub-note" style="margin-top:6px">Shown on the leaderboard. No account needed; your save code carries it to other devices.</p>
+      </section>`;
   }
 
   private codexSection(): string {

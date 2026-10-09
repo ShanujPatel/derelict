@@ -87,7 +87,7 @@
 
 .hub-tabs {
   display: grid;
-  grid-template-columns: repeat(4, 1fr);
+  grid-template-columns: repeat(5, 1fr);
   border-top: 1px solid var(--line);
   border-bottom: 1px solid var(--line);
 }
@@ -478,6 +478,118 @@
   color: var(--green);
 }
 
+/* ---------------------------------------------------------------- daily */
+
+.daily-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  margin-bottom: 6px;
+  color: var(--muted);
+  font-size: 12px;
+  letter-spacing: 0.14em;
+}
+
+.daily-head b {
+  color: var(--cyan);
+  font-weight: 400;
+}
+
+.daily-best {
+  margin-top: 10px;
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.daily-best b {
+  font-size: 20px;
+  color: var(--amber);
+  font-weight: 400;
+  margin-left: 6px;
+}
+
+.daily-card .btn.launch {
+  width: 100%;
+  min-height: 44px;
+  font-size: 13px;
+  letter-spacing: 0.16em;
+}
+
+.board {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.board li {
+  display: grid;
+  grid-template-columns: 2.2em 1fr auto 3.6em 1.4em;
+  gap: 8px;
+  align-items: center;
+  background: var(--panel);
+  border: 1px solid var(--line);
+  padding: 8px 10px;
+  font-size: 13px;
+}
+
+.board li.you {
+  border-color: var(--amber);
+}
+
+.board li:nth-child(-n + 3) .b-rank {
+  color: var(--amber);
+}
+
+.b-rank,
+.b-time,
+.b-crew {
+  color: var(--muted);
+}
+
+.b-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.b-name small {
+  color: var(--amber);
+  font-size: 10px;
+  letter-spacing: 0.12em;
+}
+
+.b-score {
+  color: var(--cyan);
+  text-align: right;
+}
+
+.b-time {
+  text-align: right;
+}
+
+.callsign-row {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 8px;
+}
+
+.callsign-row input {
+  font: inherit;
+  font-size: 15px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--text);
+  background: #0a0e17;
+  border: 1px solid var(--line);
+  padding: 8px 10px;
+  min-height: 40px;
+  user-select: text;
+  -webkit-user-select: text;
+}
+
 /* ---------------------------------------------------------------- launch bar */
 
 .hub-launch {
@@ -605,5 +717,13 @@
 @media (prefers-reduced-motion: reduce) {
   .hub-toast {
     transition: none;
+  }
+}
+
+@media (max-width: 440px) {
+  /* Five tabs on a phone: tighter type so UPGRADES fits. */
+  .hub-tab {
+    font-size: 11px;
+    letter-spacing: 0.04em;
   }
 }

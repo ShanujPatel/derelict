@@ -1,6 +1,20 @@
 # Changelog
 
-## [0.3.0] — Unreleased
+## [0.4.0] — Unreleased
+
+### Added
+- Online Daily Derelict leaderboard on Supabase. A new DAILY tab shows today's ship, your best, the top 20 and your callsign; extracted daily runs post automatically and the end screen shows your rank.
+- `docs/supabase.sql`: a locked-down table plus `submit_score`/`get_daily_board` functions with server-side checks (today's seed only, score and speed limits, callsign rules, best-only, 30 attempts a day). Tested in CI against a real Postgres engine (PGlite).
+- `docs/LEADERBOARD.md` setup guide, `.env.example`, and optional `SUPABASE_URL`/`SUPABASE_KEY` repository variables in CI.
+- Gravecutter rivals dock 45–75 seconds into every run (seeded, so the same for everyone on the daily ship). Raiders walk round walls to steal loose salvage and fire three-round bursts. The brute's riot shield blocks shots from the front; the railgun pierces it. Killing a rival drops everything it stole.
+- Grav tool (200 salvage): cone-shaped push that shoves and stuns enemies for 0.7 s, does 1 damage and destroys incoming shots.
+- Pathfinding (`findPath`, `nearestByWalking`) for enemies that need to navigate the ship.
+- Anonymous player id and editable callsign in the save; they travel with save codes.
+
+### Fixed
+- Bullet damage is read before the bullet is removed. A refactor in this release had briefly made hits deal no damage, which the browser tests caught.
+
+## [0.3.0] — 2026-10-09
 
 ### Added
 - Research vessels: a second ship type with teal lab tiles, Bloom growth on the floors and darker lighting.

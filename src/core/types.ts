@@ -24,13 +24,16 @@ export type ShipType = 'freighter' | 'research';
 
 export const SHIP_TYPES: readonly ShipType[] = ['freighter', 'research'];
 
-/** Hostiles: drones and turrets on freighters, aliens on research vessels. */
-export type EnemyKind = 'drone' | 'turret' | 'crawler' | 'spitter' | 'egg';
+/**
+ * Hostiles: drones and turrets on freighters, aliens on research vessels,
+ * and Gravecutter rivals (raider, brute) who board mid-run on any ship.
+ */
+export type EnemyKind = 'drone' | 'turret' | 'crawler' | 'spitter' | 'egg' | 'raider' | 'brute';
 /** Things to pick up or open. */
 export type ItemKind = 'oxygen' | 'salvage' | 'cache' | 'datalog';
 export type SpawnKind = EnemyKind | ItemKind;
 
-export const ENEMY_KINDS: readonly EnemyKind[] = ['drone', 'turret', 'crawler', 'spitter', 'egg'];
+export const ENEMY_KINDS: readonly EnemyKind[] = ['drone', 'turret', 'crawler', 'spitter', 'egg', 'raider', 'brute'];
 
 export interface Spawn extends Point {
   kind: SpawnKind;

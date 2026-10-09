@@ -349,6 +349,54 @@ export const DATALOG: PixelSprite = {
   rows: ['.g.g.g..', 'kkkkkkk.', 'kcCccck.', 'kCcCcck.', 'kccCcCk.', 'kcccCck.', 'kkkkkkk.', '.g.g.g..'],
 };
 
+// ------------------------------------------------------------------ v0.4: Gravecutter rivals
+
+const RAIDER_ROWS = [
+  '..............',
+  '....kkkkk.....',
+  '...kgRRrrk....',
+  '..kggRrrrrk...',
+  '.kkgrrrrvvwk..',
+  'kggkrrsrvvvkGG',
+  'kggkrsssrvvkGG',
+  'kggkrrsrvvvk..',
+  '.kkgrrrrvvk...',
+  '..kggrrrrrk...',
+  '...kggrrrk....',
+  '....kkkkk.....',
+  '..............',
+  '..............',
+];
+/** Gravecutter raider in a welding rig, facing right. Saw-blade insignia on the chest. */
+export const RAIDER: PixelSprite = {
+  palette: { k: '#120808', r: '#7a2e2e', R: '#a8453c', g: '#4a4f5a', v: '#ff9a3c', w: '#ffe0b0', G: '#c9ced8', s: '#e8b04a' },
+  rows: RAIDER_ROWS,
+};
+
+const BRUTE_ROWS = [
+  '................',
+  '................',
+  '....kkkkkk..kk..',
+  '...kmmBBbbk.kSk.',
+  '..kmmBBbbbbkkSsk',
+  '..kmBBbbbbbbkSsk',
+  '.kmmBbbbbbeekSyk',
+  '.kmmBbbbbbeekSyk',
+  '.kmmBbbbbbbbkSsk',
+  '.kmmBbbbbbbbkSsk',
+  '..kmbbbbbbbbkSsk',
+  '..kmmbbbbbbkkSsk',
+  '...kmmbbbbk.kSk.',
+  '....kkkkkk..kk..',
+  '................',
+  '................',
+];
+/** Gravecutter brute carrying a riot shield on its right (front) side. */
+export const BRUTE: PixelSprite = {
+  palette: { k: '#0e0b0b', b: '#5a2b26', B: '#7d3a33', m: '#3a3d45', S: '#9aa5b8', s: '#6b7486', y: '#e8b04a', e: '#ff3b4e' },
+  rows: BRUTE_ROWS,
+};
+
 // ------------------------------------------------------------------ tileset
 
 export interface TileTheme {

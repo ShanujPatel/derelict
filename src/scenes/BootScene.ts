@@ -11,6 +11,8 @@ import {
   SPITTER_FRAMES,
   TURRET_BARREL,
   TURRET_FRAMES,
+  RAIDER,
+  BRUTE,
   DRONE_FRAMES,
   FLASH,
   LAMP,
@@ -51,6 +53,8 @@ export class BootScene extends Phaser.Scene {
       acid: ACID,
       barrel: TURRET_BARREL,
       datalog: DATALOG,
+      raider: RAIDER,
+      brute: BRUTE,
     };
     for (const [key, sprite] of Object.entries(singles)) makeSpriteSheet(this, key, [sprite]);
 

@@ -1,4 +1,5 @@
 import Phaser from 'phaser';
+import { RIVAL_CARRY_LIMIT } from '../core/rivals';
 import type { EnemyKind, Point } from '../core/types';
 
 type Sprite = Phaser.Physics.Arcade.Sprite;
@@ -23,12 +24,19 @@ export const ENEMY_STATS: Record<EnemyKind, EnemyStats> = {
   spitter: { hp: 4, contactDamage: 10, solid: false, speed: 26, sight: 170, drop: [0.5, 5, 10], radius: 6, offset: 1, shadowY: 8 },
   egg: { hp: 3, contactDamage: 0, solid: true, speed: 0, sight: 140, drop: [1, 6, 12], radius: 5, offset: 1, shadowY: 7 },
   turret: { hp: 5, contactDamage: 0, solid: true, speed: 0, sight: 170, drop: [0.6, 6, 12], radius: 6, offset: 1, shadowY: 0 },
+  raider: { hp: 4, contactDamage: 8, solid: false, speed: 62, sight: 180, drop: [0.8, 6, 14], radius: 5, offset: 2, shadowY: 7 },
+  brute: { hp: 8, contactDamage: 16, solid: false, speed: 48, sight: 200, drop: [1, 10, 18], radius: 6, offset: 2, shadowY: 8 },
 };
+
+/** Enemies that use walking routes rather than flying straight at you. */
+export const RIVAL_KINDS: readonly EnemyKind[] = ['raider', 'brute'];
 
 const TURRET_COOLDOWN = 1300;
 const SPITTER_COOLDOWN = 1700;
 const EGG_COOLDOWN = 4500;
 const EGG_BROOD = 3;
+const RAIDER_COOLDOWN = 1800;
+const RETARGET_MS = 1200;
 
 /** What an enemy can see and do in the world. Implemented by GameScene. */
 export interface EnemyWorld {
@@ -42,6 +50,12 @@ export interface EnemyWorld {
   shootAtEnemies(x: number, y: number, angle: number): void;
   spawnEnemy(kind: EnemyKind, x: number, y: number): Sprite;
   moveTowards(e: Sprite, target: Point, speed: number): void;
+  /** Walks along a route round walls towards a world position. */
+  followPath(e: Sprite, target: Point, speed: number): void;
+  /** Loose salvage a rival could grab: the nearest one by walking distance. */
+  nearestSalvage(e: Sprite): Sprite | null;
+  /** A rival picks up a salvage pickup. */
+  steal(e: Sprite, pickup: Sprite): void;
 }
 
 export const kindOf = (e: Sprite) => e.getData('kind') as EnemyKind;
@@ -53,6 +67,12 @@ export function updateEnemy(e: Sprite, world: EnemyWorld, time: number) {
   const stats = ENEMY_STATS[kind];
   const shadow = e.getData('shadow') as Phaser.GameObjects.Image | undefined;
   shadow?.setPosition(e.x, e.y + stats.shadowY);
+
+  // Stunned by the grav tool: drift and do nothing else.
+  if (time < (e.getData('stunnedUntil') ?? 0)) {
+    e.setVelocity((e.body?.velocity.x ?? 0) * 0.92, (e.body?.velocity.y ?? 0) * 0.92);
+    return;
+  }
 
   if (kind === 'turret') return updateTurret(e, world, time, stats);
 
@@ -94,6 +114,15 @@ export function updateEnemy(e: Sprite, world: EnemyWorld, time: number) {
       }
       return;
     }
+
+    case 'raider':
+      return updateRaider(e, world, time, stats, dist, sees);
+
+    case 'brute':
+      if (sees) world.moveTowards(e, p, stats.speed);
+      else world.followPath(e, p, stats.speed);
+      faceVelocity(e);
+      return;
 
     case 'egg': {
       const brood = (e.getData('brood') as number) ?? 0;
@@ -142,6 +171,53 @@ function updateTurret(e: Sprite, world: EnemyWorld, time: number, stats: EnemySt
     if (isHacked(e)) world.shootAtEnemies(mx, my, barrel.rotation);
     else world.shootAtPlayer(mx, my, barrel.rotation, 210, 9, 'bullet');
   }
+}
+
+/**
+ * Raiders keep a firing distance and shoot in bursts when they see you;
+ * otherwise they go after loose salvage until their packs are full, then hunt you.
+ */
+function updateRaider(e: Sprite, world: EnemyWorld, time: number, stats: EnemyStats, dist: number, sees: boolean) {
+  const p = world.player;
+  if (sees) {
+    const a = Phaser.Math.Angle.Between(e.x, e.y, p.x, p.y);
+    e.setRotation(a);
+    if (dist > 140) world.followPath(e, p, stats.speed);
+    else if (dist < 80) e.setVelocity(-Math.cos(a) * stats.speed, -Math.sin(a) * stats.speed);
+    else e.setVelocity(Math.cos(a + Math.PI / 2) * 20, Math.sin(a + Math.PI / 2) * 20); // sidestep
+    if (time > (e.getData('nextShot') ?? 0)) {
+      e.setData('nextShot', time + RAIDER_COOLDOWN);
+      for (let i = 0; i < 3; i++) {
+        e.scene.time.delayedCall(i * 110, () => {
+          if (!e.active) return;
+          const aim = Phaser.Math.Angle.Between(e.x, e.y, p.x, p.y) + Phaser.Math.FloatBetween(-0.08, 0.08);
+          world.shootAtPlayer(e.x + Math.cos(aim) * 9, e.y + Math.sin(aim) * 9, aim, 230, 6, 'bullet');
+        });
+      }
+    }
+    return;
+  }
+
+  const carrying = (e.getData('loot') as number[] | undefined)?.length ?? 0;
+  if (carrying < RIVAL_CARRY_LIMIT) {
+    let target = e.getData('lootTarget') as Sprite | null;
+    if (!target?.active || time > (e.getData('retargetAt') ?? 0)) {
+      target = world.nearestSalvage(e);
+      e.setData({ lootTarget: target, retargetAt: time + RETARGET_MS });
+    }
+    if (target?.active) {
+      if (Phaser.Math.Distance.Between(e.x, e.y, target.x, target.y) < 10) {
+        world.steal(e, target);
+        e.setData('lootTarget', null);
+      } else {
+        world.followPath(e, target, stats.speed);
+      }
+      faceVelocity(e);
+      return;
+    }
+  }
+  world.followPath(e, p, stats.speed);
+  faceVelocity(e);
 }
 
 function wander(e: Sprite, time: number, speed: number) {
