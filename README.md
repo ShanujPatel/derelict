@@ -52,7 +52,7 @@ Progress saves in your browser. Use **Log → Copy save code** to move it to ano
 
 <img src="docs/screenshot-hub.png" alt="Hub screen" width="480">
 
-**Daily Derelict:** one ship a day, the same for everyone. Extract to post your salvage to the online leaderboard (DAILY tab); only your best run counts. Setting up your own board takes about 10 minutes: see [docs/LEADERBOARD.md](docs/LEADERBOARD.md).
+**Daily Derelict:** one ship a day, the same for everyone. Extract to post your salvage to the online leaderboard (DAILY tab); only your best run counts. You start with a random sci-fi name like *NYX HARROW* or *COLD COMET*; change it or roll a new one at the top of the **Crew** tab. Names are unique across all players. Setting up your own board takes about 10 minutes: see [docs/LEADERBOARD.md](docs/LEADERBOARD.md).
 
 **Seeds:** every ship comes from a seed shown in the top-right corner. Share a ship with `?seed=YOURSEED` (add `&ship=research` for a research vessel), or play today's shared ship with `?daily`.
 
@@ -108,6 +108,7 @@ See the full [game design document](docs/GDD.md).
 - [x] **v0.3** Research vessels, alien enemies, turrets, hacking tool, codex chapter 1
 - [x] **v0.4** Online daily leaderboard, Gravecutter rivals, grav tool
 - [x] **v0.5** Synthesised sound and music, pause menu, settings, hit-pause, death and extraction moments
+- [x] **v0.5.1** Name your salvager: random unique sci-fi names, shown on the leaderboard
 - [ ] **Later** Bosses, more codex chapters, more ship types
 
 ## Licence

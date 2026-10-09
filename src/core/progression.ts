@@ -38,8 +38,10 @@ export interface SaveData {
   rewards: string[];
   /** Anonymous id for the leaderboard; set by storage on first load. */
   playerId: string;
-  /** Leaderboard name. */
+  /** Your name, shown on the leaderboard. */
   callsign: string;
+  /** The name the leaderboard last confirmed is yours; differs from callsign until checked. */
+  callsignClaimed: string;
   /** Best extracted score on today's Daily Derelict. */
   daily: { day: string; best: number };
   settings: Settings;
@@ -97,6 +99,7 @@ export function defaultSave(): SaveData {
     rewards: [],
     playerId: '',
     callsign: '',
+    callsignClaimed: '',
     daily: { day: '', best: 0 },
     settings: { ...DEFAULT_SETTINGS },
     cosmetics: [],
@@ -247,6 +250,11 @@ export function setCallsign(save: SaveData, raw: string): SaveData {
   return { ...clone(save), callsign };
 }
 
+/** Records that the leaderboard has confirmed this name belongs to you. */
+export function setClaimedName(save: SaveData, name: string): SaveData {
+  return { ...clone(save), callsign: name, callsignClaimed: name };
+}
+
 export function updateSettings(save: SaveData, patch: Partial<Settings>): SaveData {
   return { ...clone(save), settings: sanitizeSettings({ ...save.settings, ...patch }) };
 }
@@ -389,6 +397,7 @@ export function sanitizeSave(raw: unknown): SaveData {
     ...d,
     playerId: typeof raw.playerId === 'string' && /^[0-9a-f-]{36}$/i.test(raw.playerId) ? raw.playerId : '',
     callsign: typeof raw.callsign === 'string' ? (cleanCallsign(raw.callsign) ?? '') : '',
+    callsignClaimed: typeof raw.callsignClaimed === 'string' ? (cleanCallsign(raw.callsignClaimed) ?? '') : '',
     daily:
       typeof dailyRaw.day === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(dailyRaw.day)
         ? { day: dailyRaw.day, best: num(dailyRaw.best) }

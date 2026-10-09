@@ -23,6 +23,8 @@ export interface LeaderboardClient {
   readonly enabled: boolean;
   submit(s: ScoreSubmission): Promise<SubmitResult>;
   board(day: string, playerId: string, limit?: number): Promise<BoardEntry[]>;
+  /** Reserves a name for this player. False if someone else already has it. */
+  claimName(playerId: string, name: string): Promise<boolean>;
 }
 
 export function createLeaderboardClient(
@@ -83,6 +85,11 @@ export function createLeaderboardClient(
       const row = rows[0];
       if (!row) throw new LeaderboardError('No rank returned');
       return { rank: Number(row.rank), total: Number(row.total), best: Number(row.best) };
+    },
+
+    async claimName(playerId, name) {
+      const result = await call<boolean>('claim_callsign', { p_player: playerId, p_callsign: name });
+      return result === true;
     },
 
     async board(day, playerId, limit = 20) {

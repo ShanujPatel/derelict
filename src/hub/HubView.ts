@@ -15,6 +15,7 @@ import { CHAPTERS, CODEX, chapterProgress } from '../core/codex';
 import { dailySeed, dailyShip } from '../core/seed';
 import { dayFromDailySeed, formatDuration, type BoardEntry } from '../core/leaderboard';
 import { leaderboard } from '../net/leaderboard';
+import { chooseName, ensureName, rollName, type NameResult } from '../net/names';
 import type { ShipType } from '../core/types';
 import {
   canBoard,
@@ -29,7 +30,6 @@ import {
   setDestination,
   setGun,
   setLook,
-  setCallsign,
   setPerk,
   setTool,
   updateSettings,
@@ -39,6 +39,8 @@ import {
 } from '../core/progression';
 import { WEAPONS, type WeaponId } from '../core/weapons';
 import type { SfxName } from '../core/sfx';
+
+const esc = (t: string) => t.replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[c]!);
 
 type Tab = 'crew' | 'loadout' | 'upgrades' | 'daily' | 'log';
 
@@ -77,6 +79,7 @@ export class HubView {
     error: null,
   };
   private exportCode = '';
+  private naming = false;
 
   constructor(
     private save: SaveData,
@@ -108,6 +111,18 @@ export class HubView {
     window.addEventListener('keydown', this.onKey);
     document.body.appendChild(this.root);
     this.render();
+    this.checkName();
+  }
+
+  /** Reserves the current name in the background; rolls a new one if it's been taken. */
+  private checkName() {
+    void ensureName(this.save, leaderboard).then(({ save, renamedFrom }) => {
+      if (save === this.save || !this.root.isConnected) return;
+      this.save = save;
+      this.callbacks.onSave(save);
+      this.render();
+      if (renamedFrom) this.toast(`${renamedFrom} was taken. You're now ${save.callsign}`, true);
+    });
   }
 
   destroy() {
@@ -119,6 +134,10 @@ export class HubView {
   // ---------------------------------------------------------------- events
 
   private onKey = (e: KeyboardEvent) => {
+    if (e.key === 'Enter' && e.target instanceof HTMLInputElement && 'callsign' in e.target.dataset) {
+      e.preventDefault();
+      return this.rename(chooseName(this.save, e.target.value, leaderboard));
+    }
     if (e.key === 'Enter' && !(e.target instanceof HTMLTextAreaElement) && !(e.target instanceof HTMLInputElement)) {
       e.preventDefault();
       this.callbacks.onLaunch(false);
@@ -174,11 +193,10 @@ export class HubView {
       }
       case 'callsign': {
         const field = this.root.querySelector<HTMLInputElement>('[data-callsign]');
-        const next = setCallsign(this.save, field?.value ?? '');
-        if (next === this.save) return this.toast('3–16 letters, numbers, spaces, - or _', true);
-        this.update(next);
-        return this.toast(`Callsign set: ${next.callsign}`);
+        return this.rename(chooseName(this.save, field?.value ?? '', leaderboard));
       }
+      case 'reroll':
+        return this.rename(rollName(this.save, leaderboard));
       case 'refresh-board':
         this.board.at = 0;
         return this.render();
@@ -208,6 +226,28 @@ export class HubView {
     this.sound('buy');
     this.update(result.save);
     this.toast(label);
+  }
+
+  /** Applies a name change once the leaderboard has answered. */
+  private rename(pending: Promise<NameResult>) {
+    if (this.naming) return;
+    this.naming = true;
+    this.render();
+    void pending.then((r) => {
+      this.naming = false;
+      if (!this.root.isConnected) return;
+      if (!r.ok) {
+        this.sound('denied');
+        this.render();
+        return this.toast(r.reason, true);
+      }
+      this.sound('buy');
+      this.save = r.save;
+      this.callbacks.onSave(r.save);
+      this.board.at = 0;
+      this.render();
+      this.toast(r.offline ? `Name set to ${r.save.callsign}. We'll check it's free next time you're online` : `You're ${r.save.callsign}`);
+    });
   }
 
   private sound(name: SfxName) {
@@ -263,7 +303,7 @@ export class HubView {
 
   private render() {
     this.root.querySelector('[data-credits]')!.textContent = String(this.save.credits);
-    this.root.querySelectorAll<HTMLElement>('[data-tab]').forEach((t) => {
+    this.root.querySelectorAll<HTMLElement>('.hub-tab').forEach((t) => {
       t.setAttribute('aria-selected', String(t.dataset.tab === this.tab));
     });
     const views: Record<Tab, () => string> = {
@@ -342,6 +382,7 @@ export class HubView {
         .join('');
 
     return `
+      ${this.nameSection()}
       <section class="card preview">
         <canvas data-preview width="16" height="16" aria-label="${c.name} preview"></canvas>
         <div>
@@ -358,6 +399,18 @@ export class HubView {
       <section class="hub-section"><h3>Crew</h3><div class="choices">${characters}</div></section>
       <section class="hub-section"><h3>${c.id === 'robot' ? 'Chassis' : 'Suit'}</h3><div class="swatches">${swatches('body')}</div></section>
       <section class="hub-section"><h3>${c.id === 'robot' ? 'Optics' : 'Visor'}</h3><div class="swatches">${swatches('accent')}</div></section>`;
+  }
+
+  private nameSection(): string {
+    const busy = this.naming ? 'disabled' : '';
+    return `<section class="hub-section name-section"><h3>Your name</h3>
+      <div class="callsign-row">
+        <input data-callsign maxlength="16" value="${esc(this.save.callsign)}" aria-label="Your name" autocomplete="off" spellcheck="false" ${busy} />
+        <button class="btn ghost" data-action="callsign" ${busy}>SAVE</button>
+        <button class="btn ghost dice" data-action="reroll" title="Random name" aria-label="Random name" ${busy}>⚄</button>
+      </div>
+      <p class="hub-note" style="margin-top:6px">Shown on the daily leaderboard. Every name is unique. Tap ⚄ for a random one.</p>
+    </section>`;
   }
 
   private loadoutTab(): string {
@@ -479,7 +532,6 @@ export class HubView {
     const ship = dailyShip(dailySeed(new Date())) === 'research' ? 'Research vessel' : 'Freighter';
     const date = new Date(`${day}T12:00:00Z`).toLocaleDateString('en-GB', { weekday: 'short', day: 'numeric', month: 'short' });
     const best = this.save.daily.day === day ? this.save.daily.best : null;
-    const esc = (t: string) => t.replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[c]!);
 
     let board: string;
     if (!leaderboard.enabled) {
@@ -514,13 +566,7 @@ export class HubView {
         <div class="btn-row"><button class="btn launch" data-action="daily">PLAY TODAY'S DERELICT ▸</button></div>
       </section>
       <section class="hub-section"><h3>Top salvagers · ${day}</h3>${board}</section>
-      <section class="hub-section"><h3>Your callsign</h3>
-        <div class="callsign-row">
-          <input data-callsign maxlength="16" value="${esc(this.save.callsign)}" aria-label="Callsign" autocomplete="off" spellcheck="false" />
-          <button class="btn ghost" data-action="callsign">SAVE</button>
-        </div>
-        <p class="hub-note" style="margin-top:6px">Shown on the leaderboard. No account needed; your save code carries it to other devices.</p>
-      </section>`;
+      <p class="hub-note">Posting as <b>${esc(this.save.callsign)}</b>. Change your name in <button class="text-link" data-tab="crew">CREW</button>. No account needed; your save code carries it to other devices.</p>`;
   }
 
   private settingsSection(): string {

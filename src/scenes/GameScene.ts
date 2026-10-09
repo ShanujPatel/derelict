@@ -20,7 +20,7 @@ import {
 import { dayFromDailySeed } from '../core/leaderboard';
 import { findPath, hasLineOfSight, nearestByWalking } from '../core/pathing';
 import { GRAV_CONE, GRAV_RANGE, hitsShield, inGravCone, rivalEvent, type RivalEvent } from '../core/rivals';
-import { applyRunResult, computeRunStats, recordDaily, type RunStats, type SaveData } from '../core/progression';
+import { applyRunResult, computeRunStats, recordDaily, setClaimedName, type RunStats, type SaveData } from '../core/progression';
 import { hashString, type ResolvedSeed } from '../core/seed';
 import { ENEMY_KINDS, Tile, type EnemyKind, type Point } from '../core/types';
 import { WEAPONS, pelletAngles, type WeaponDef } from '../core/weapons';
@@ -1009,8 +1009,15 @@ export class GameScene extends Phaser.Scene implements EnemyWorld {
             character: this.stats.character.id,
             playerId: after.playerId,
           })
-          .then((r) => status.active && status.setText(`DAILY RANK #${r.rank} of ${r.total} · best ${r.best}`))
-          .catch((e: Error) => status.active && status.setText(`Leaderboard: ${e.message}`).setColor('#ff9a3c'));
+          .then((r) => {
+            // Posting reserves your name, so there's no need to check it again.
+            if (after.callsign !== after.callsignClaimed) storeSave(setClaimedName(loadSave(), after.callsign));
+            if (status.active) status.setText(`DAILY RANK #${r.rank} of ${r.total} · best ${r.best}`);
+          })
+          .catch((e: Error) => {
+            const message = /name taken/.test(e.message) ? 'Name taken. Pick a new one in CREW' : `Leaderboard: ${e.message}`;
+            if (status.active) status.setText(message).setColor('#ff9a3c');
+          });
       }
     }
 

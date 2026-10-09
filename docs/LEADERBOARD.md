@@ -14,7 +14,9 @@ The game works without this; the DAILY tab just shows your personal best. These 
 2. Paste the whole of [`docs/supabase.sql`](supabase.sql) and click **Run**.
 3. You should see *Success. No rows returned*. Running it again later is safe and keeps existing scores.
 
-This creates one locked-down table and two functions. Browsers can't read or write the table directly: they can only call `submit_score` (which checks every run) and `get_daily_board` (which never reveals player ids).
+This creates two locked-down tables (scores and player names) and three functions. Browsers can't read or write the tables directly: they can only call `submit_score` (which checks every run), `claim_callsign` (which reserves a unique name) and `get_daily_board` (which never reveals player ids).
+
+**Updating from an older version:** paste and run the latest `docs/supabase.sql` again whenever it changes. v0.5.1 added unique names; until you re-run it, the game can't reserve names and posting a score fails.
 
 ## 3. Copy the project URL and publishable key
 
@@ -46,7 +48,7 @@ Checks happen in the browser (`src/core/leaderboard.ts`) and again in the databa
 
 - only today's (or, just after midnight UTC, yesterday's) Daily Derelict seed is accepted
 - score between 0 and 1,500 salvage, run length at least 20 seconds, and no more than 12 salvage per second
-- callsigns are 3–16 letters, numbers, spaces, `-` or `_`
+- names are 3–16 letters, numbers, spaces, `-` or `_`, and unique: each player reserves one, nobody can post under a name someone else holds, and the board always shows a player's current name
 - one row per player per day keeps only their best; at most 30 submissions a day
 
 It's a light, showcase-level defence: a determined cheater could still post a believable fake score. The SQL is tested against a real Postgres engine (PGlite) in `tests/supabase-sql.test.ts`, so it runs in CI on every push.

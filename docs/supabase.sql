@@ -4,6 +4,8 @@
 --
 -- Design:
 --   * One row per player per day; only their best extracted score is kept.
+--   * Names are unique: each player reserves one in the players table, and
+--     the board always shows a player's current name.
 --   * The browser can't touch the table directly. It can only call the two
 --     functions below, which check every submission (same limits as
 --     src/core/leaderboard.ts) and never reveal other players' ids.
@@ -27,6 +29,53 @@ create index if not exists daily_scores_board on public.daily_scores (day, score
 -- Lock the table down: row level security on, no policies, no grants.
 alter table public.daily_scores enable row level security;
 revoke all on public.daily_scores from anon, authenticated;
+
+-- One name per player, and no two players share a name.
+create table if not exists public.players (
+  player_id   uuid        primary key,
+  callsign    text        not null unique check (callsign ~ '^[A-Z0-9 _-]{3,16}$'),
+  updated_at  timestamptz not null default now()
+);
+
+alter table public.players enable row level security;
+revoke all on public.players from anon, authenticated;
+
+-- Players who posted scores before names were unique keep their latest name
+-- (first come, first served if two picked the same one).
+insert into public.players (player_id, callsign)
+select distinct on (player_id) player_id, callsign
+from public.daily_scores
+order by player_id, updated_at desc
+on conflict do nothing;
+
+-- Reserve a name. True if it's now yours, false if someone else has it.
+create or replace function public.claim_callsign(p_player uuid, p_callsign text)
+returns boolean
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  v_name text := upper(btrim(regexp_replace(coalesce(p_callsign, ''), '\s+', ' ', 'g')));
+begin
+  if p_player is null then
+    raise exception 'player id required' using errcode = '22023';
+  end if;
+  if v_name !~ '^[A-Z0-9 _-]{3,16}$' then
+    raise exception 'invalid name' using errcode = '22023';
+  end if;
+  if exists (select 1 from players where callsign = v_name and player_id <> p_player) then
+    return false;
+  end if;
+  insert into players (player_id, callsign) values (p_player, v_name)
+  on conflict (player_id) do update set callsign = excluded.callsign, updated_at = now()
+  where players.callsign is distinct from excluded.callsign;
+  return true;
+exception when unique_violation then
+  -- Someone claimed it at the same moment.
+  return false;
+end;
+$$;
 
 -- Submit a finished Daily Derelict run. Returns your rank for the day.
 create or replace function public.submit_score(
@@ -61,6 +110,9 @@ begin
   end if;
   if p_score::numeric / (p_duration_ms / 1000.0) > 12 then
     raise exception 'score too fast' using errcode = '22023';
+  end if;
+  if not claim_callsign(p_player, p_callsign) then
+    raise exception 'name taken' using errcode = '22023';
   end if;
 
   insert into daily_scores as d (day, player_id, callsign, ship, crew, score, kills, duration_ms)
@@ -107,8 +159,11 @@ security definer
 set search_path = public
 as $$
   with ranked as (
-    select s.*, rank() over (order by s.score desc, s.duration_ms asc) as rank
+    select s.player_id, s.score, s.kills, s.duration_ms, s.crew,
+           coalesce(p.callsign, s.callsign) as callsign,
+           rank() over (order by s.score desc, s.duration_ms asc) as rank
     from daily_scores s
+    left join players p on p.player_id = s.player_id
     where s.day = p_day
   )
   select r.rank, r.callsign, r.score, r.kills, r.duration_ms, r.crew,
@@ -121,5 +176,7 @@ $$;
 
 revoke all on function public.submit_score(date, text, uuid, text, text, text, integer, integer, integer) from public;
 revoke all on function public.get_daily_board(date, uuid, integer) from public;
+revoke all on function public.claim_callsign(uuid, text) from public;
 grant execute on function public.submit_score(date, text, uuid, text, text, text, integer, integer, integer) to anon, authenticated;
 grant execute on function public.get_daily_board(date, uuid, integer) to anon, authenticated;
+grant execute on function public.claim_callsign(uuid, text) to anon, authenticated;

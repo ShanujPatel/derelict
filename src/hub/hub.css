@@ -572,7 +572,7 @@
 
 .callsign-row {
   display: grid;
-  grid-template-columns: 1fr auto;
+  grid-template-columns: 1fr auto auto;
   gap: 8px;
 }
 
@@ -588,6 +588,36 @@
   min-height: 40px;
   user-select: text;
   -webkit-user-select: text;
+}
+
+.text-link {
+  font: inherit;
+  color: var(--cyan);
+  background: none;
+  border: 0;
+  padding: 0;
+  text-decoration: underline;
+  cursor: pointer;
+}
+
+.callsign-row input {
+  min-width: 0;
+}
+
+.callsign-row .btn {
+  min-width: 0;
+  padding-inline: 14px;
+}
+
+.callsign-row .dice {
+  width: 48px;
+  font-size: 20px;
+  line-height: 1;
+  padding-inline: 0;
+}
+
+.callsign-row :disabled {
+  opacity: 0.5;
 }
 
 /* ---------------------------------------------------------------- settings */

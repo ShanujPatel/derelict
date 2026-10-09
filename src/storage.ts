@@ -1,4 +1,4 @@
-import { randomCallsign } from './core/leaderboard';
+import { isPlaceholderName, randomName } from './core/names';
 import { defaultSave, sanitizeSave, type SaveData } from './core/progression';
 
 // localStorage can be missing or throw (private mode, blocked storage), so every access is guarded.
@@ -14,10 +14,14 @@ function newPlayerId(): string {
   });
 }
 
-/** Gives a save an anonymous leaderboard id and a default callsign the first time. */
+/**
+ * Gives a save an anonymous leaderboard id and a random name the first time.
+ * Old placeholder names ("SALVAGER-0421") are swapped for a proper one.
+ */
 function withIdentity(save: SaveData): SaveData {
-  if (save.playerId && save.callsign) return save;
-  const next = { ...save, playerId: save.playerId || newPlayerId(), callsign: save.callsign || randomCallsign() };
+  if (save.playerId && save.callsign && !isPlaceholderName(save.callsign)) return save;
+  const callsign = save.callsign && !isPlaceholderName(save.callsign) ? save.callsign : randomName();
+  const next = { ...save, playerId: save.playerId || newPlayerId(), callsign };
   storeSave(next);
   return next;
 }

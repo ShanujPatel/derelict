@@ -6,7 +6,6 @@ import {
   cleanCallsign,
   dayFromDailySeed,
   formatDuration,
-  randomCallsign,
   type ScoreSubmission,
 } from '../src/core/leaderboard';
 import { bfsDistances, findPath, nearestByWalking } from '../src/core/pathing';
@@ -133,7 +132,6 @@ describe('leaderboard rules', () => {
     expect(cleanCallsign('ab')).toBeNull();
     expect(cleanCallsign('a'.repeat(17))).toBeNull();
     expect(cleanCallsign('ok_name-1')).toBe('OK_NAME-1');
-    expect(cleanCallsign(randomCallsign(() => 0.5))).toBe('SALVAGER-5000');
   });
 
   it('reads the day from daily seeds only', () => {

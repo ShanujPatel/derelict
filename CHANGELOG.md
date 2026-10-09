@@ -1,5 +1,16 @@
 # Changelog
 
+## [0.5.1] — Unreleased
+
+### Added
+- Name your salvager at the top of the **Crew** tab. New players get a random sci-fi name (*NYX HARROW*, *COLD COMET*, *VOSS-27*); the ⚄ button rolls another. Old `SALVAGER-0000` placeholders are replaced automatically.
+- Names are unique across all players. A new `players` table and `claim_callsign` function in `docs/supabase.sql` reserve each name; posting under someone else's name is refused, and the board shows each player's current name, so renaming updates past entries. **Re-run `docs/supabase.sql` in Supabase after updating.**
+- If your name was taken while you were offline, you get a new random one when the hub opens and a message saying so.
+- `tests/names.test.ts`, plus SQL tests for unique names.
+
+### Changed
+- The name box moved from the DAILY tab to the Crew tab; DAILY shows who you're posting as.
+
 ## [0.5.0] — Unreleased
 
 ### Added

@@ -30,7 +30,7 @@ beforeAll(async () => {
 }, 60_000);
 
 beforeEach(async () => {
-  await db.exec('reset role; delete from daily_scores;');
+  await db.exec('reset role; delete from daily_scores; delete from players;');
   await db.exec('set role anon');
 });
 
@@ -69,7 +69,7 @@ describe('supabase.sql', () => {
     [{ durationMs: 5_000 }, 'run too short'],
     [{ score: 900, durationMs: 30_000 }, 'score too fast'],
     [{ score: 5000, durationMs: 3_600_000 }, 'check'],
-    [{ callsign: '<b>hi' }, 'check'],
+    [{ callsign: '<b>hi' }, 'invalid name'],
   ] as [Run, string][])('rejects %o', async (run, message) => {
     await expect(submit(run)).rejects.toThrow(message);
   });
@@ -105,5 +105,39 @@ describe('supabase.sql', () => {
     const board = await db.query<{ is_you: boolean }>('select * from get_daily_board($1, $2, 5)', [today, P1]);
     expect(board.rows).toHaveLength(6);
     expect(board.rows.at(-1)!.is_you).toBe(true);
+  });
+
+  describe('unique names', () => {
+    const claim = async (player: string, name: string) =>
+      (await db.query<{ ok: boolean }>('select claim_callsign($1, $2) as ok', [player, name])).rows[0].ok;
+
+    it('gives each name to one player only, ignoring case and spacing', async () => {
+      expect(await claim(P1, 'Nyx  Harrow')).toBe(true);
+      expect(await claim(P1, 'NYX HARROW')).toBe(true);
+      expect(await claim(P2, 'nyx harrow')).toBe(false);
+      await expect(claim(P2, '<b>')).rejects.toThrow('invalid name');
+    });
+
+    it('frees your old name when you rename', async () => {
+      await claim(P1, 'COLD COMET');
+      await claim(P1, 'VOSS-27');
+      expect(await claim(P2, 'COLD COMET')).toBe(true);
+    });
+
+    it("won't post a score under someone else's name", async () => {
+      await claim(P2, 'ACE');
+      await expect(submit({ player: P1, callsign: 'ace' })).rejects.toThrow('name taken');
+    });
+
+    it('shows your current name on the board after a rename', async () => {
+      await submit({ player: P1, callsign: 'nova' });
+      await claim(P1, 'RUST MOTH');
+      const board = await db.query<{ callsign: string }>('select callsign from get_daily_board($1)', [today]);
+      expect(board.rows[0].callsign).toBe('RUST MOTH');
+    });
+
+    it('hides the players table from the public role', async () => {
+      await expect(db.query('select * from players')).rejects.toThrow(/permission denied/);
+    });
   });
 });

@@ -164,6 +164,7 @@ Each version is a tagged GitHub release with notes.
 | **v0.3** ✅ | Research vessel + alien enemies; turrets; codex chapter 1; hacking tool; locked caches |
 | **v0.4** ✅ | Online daily leaderboard (Supabase); Gravecutter rival boarding party (raiders + shielded brute); grav tool |
 | **v0.5** ✅ | Synthesised SFX and generative music; settings and volume; pause menu; hit-pause; death and extraction moments |
+| **v0.5.1** ✅ | Player names: random unique sci-fi names, editable in the Crew tab, shown on the leaderboard |
 | **Later** | Bosses; codex chapters 2–3; more ship types; gamepad polish; accessibility options |
 
 ## 13. Open questions

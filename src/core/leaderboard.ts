@@ -22,10 +22,6 @@ export function cleanCallsign(raw: string): string | null {
   return CALLSIGN_PATTERN.test(s) ? s : null;
 }
 
-export function randomCallsign(random: () => number = Math.random): string {
-  return `SALVAGER-${String(Math.floor(random() * 10_000)).padStart(4, '0')}`;
-}
-
 /** 'daily-2026-10-09' -> '2026-10-09'; null for any other seed. */
 export function dayFromDailySeed(seed: string): string | null {
   const m = /^daily-(\d{4}-\d{2}-\d{2})$/.exec(seed);
