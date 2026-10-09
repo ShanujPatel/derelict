@@ -83,7 +83,7 @@ Progress saves in your browser. Use **Log → Copy save code** to move it to ano
 
 **Daily Derelict:** one named wreck a day, the same for everyone; the DAILY button shows today's ship. Extract to post your salvage to the online leaderboard (DAILY tab); only your best run counts. You start with a random sci-fi name like *NYX HARROW* or *COLD COMET*; change it or roll a new one at the top of the **Crew** tab. Names are unique across all players. Setting up your own board takes about 10 minutes: see [docs/LEADERBOARD.md](docs/LEADERBOARD.md).
 
-**Hall of fame** (DAILY tab, under the daily board): all-time boards for the best salvagers. Total salvage banked, biggest haul, ships cleared, deepest dive, longest daily streak, fastest boss kills, and most kills overall, of elites, of bounties and of each hostile type. Every run you finish adds to your totals once your name is claimed (assist mode runs don't count). If you run your own board, re-run `docs/supabase.sql` after updating to add it.
+**Hall of fame** (**RANKS** tab): all-time boards for the best salvagers. Total salvage banked, biggest haul, ships cleared, deepest dive, longest daily streak, fastest boss kills, and most kills overall, of elites, of bounties and of each hostile type. Every run you finish adds to your totals once your name is claimed (assist mode runs don't count). If you run your own board, re-run `docs/supabase.sql` after updating to add it.
 
 **Seeds:** every ship comes from a seed shown in the top-right corner. Share a ship with `?seed=YOURSEED` (add `&ship=research` for a research vessel), or play today's shared ship with `?daily`.
 

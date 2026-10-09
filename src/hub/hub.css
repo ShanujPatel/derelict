@@ -87,7 +87,7 @@
 
 .hub-tabs {
   display: grid;
-  grid-template-columns: repeat(5, 1fr);
+  grid-template-columns: repeat(6, 1fr);
   border-top: 1px solid var(--line);
   border-bottom: 1px solid var(--line);
 }
@@ -1341,5 +1341,15 @@
   }
   .hall-group-name {
     padding-top: 0;
+  }
+}
+
+/* Six tabs: tighten the labels on narrow phones. */
+@media (max-width: 480px) {
+  .hub-tab {
+    font-size: 10px;
+    letter-spacing: 0.06em;
+    padding-left: 2px;
+    padding-right: 2px;
   }
 }

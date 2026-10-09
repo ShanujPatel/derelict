@@ -59,13 +59,14 @@ const formatHours = (ms: number) => {
 
 const esc = (t: string) => t.replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[c]!);
 
-type Tab = 'crew' | 'loadout' | 'upgrades' | 'daily' | 'log';
+type Tab = 'crew' | 'loadout' | 'upgrades' | 'daily' | 'ranks' | 'log';
 
 const TABS: { id: Tab; label: string }[] = [
   { id: 'crew', label: 'CREW' },
   { id: 'loadout', label: 'LOADOUT' },
   { id: 'upgrades', label: 'UPGRADES' },
   { id: 'daily', label: 'DAILY' },
+  { id: 'ranks', label: 'RANKS' },
   { id: 'log', label: 'LOG' },
 ];
 
@@ -359,6 +360,7 @@ export class HubView {
       loadout: () => this.loadoutTab(),
       upgrades: () => this.upgradesTab(),
       daily: () => this.dailyTab(),
+      ranks: () => this.ranksTab(),
       log: () => this.logTab(),
     };
     this.body.innerHTML = views[this.tab]();
@@ -650,7 +652,6 @@ export class HubView {
       ${this.weeklySection()}
       ${this.contractsSection()}
       <section class="hub-section"><h3>Top salvagers · ${day}</h3>${board}</section>
-      ${this.hallSection()}
       <p class="hub-note">Posting as <b>${esc(this.save.callsign)}</b>. Change your name in <button class="text-link" data-tab="crew">CREW</button>. No account needed; your save code carries it to other devices.</p>`;
   }
 
@@ -666,13 +667,16 @@ export class HubView {
       .catch((e: Error) => (this.hall.cache[id] = { at: Date.now(), entries: null, error: e.message }))
       .finally(() => {
         if (this.hall.loading === id) this.hall.loading = null;
-        if (this.tab === 'daily') this.render();
+        if (this.tab === 'ranks') this.render();
       });
   }
 
-  /** All-time boards: salvage, records, boss times and kills by hostile type. */
-  private hallSection(): string {
-    if (!leaderboard.enabled) return '';
+  /** RANKS: the all-time hall of fame. Salvage, records, boss times and kills by hostile type. */
+  private ranksTab(): string {
+    if (!leaderboard.enabled) {
+      return `<section class="hub-section"><h3>Hall of fame · all time</h3>
+        <p class="hub-note">The online leaderboard isn't switched on for this build, so there are no all-time rankings. Your own records are under <button class="text-link" data-tab="log">LOG</button>.</p></section>`;
+    }
     this.loadHall();
     const current = boardDef(this.hall.board);
     const groups: BoardGroup[] = ['Salvage', 'Records', 'Bosses', 'Kills'];
@@ -711,7 +715,8 @@ export class HubView {
       ${list}
       <div class="btn-row"><button class="btn ghost" data-action="refresh-hall">REFRESH</button></div>
       <p class="hub-note">Every run you finish adds to your totals once your name is claimed (assist mode runs don't count). Lost runs still count kills; salvage only counts when you extract.</p>
-    </section>`;
+    </section>
+    <p class="hub-note">Ranked as <b>${esc(this.save.callsign)}</b>. Change your name in <button class="text-link" data-tab="crew">CREW</button>. Today's board is under <button class="text-link" data-tab="daily">DAILY</button>.</p>`;
   }
 
   /** This week's challenge: ship, mutators, your best. */

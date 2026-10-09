@@ -163,6 +163,7 @@ Opt-in runs from the DAILY tab (unlocked after 3 extractions; the Bloom Mother a
 
 ## 9e. Hall of fame (v0.9)
 
+- Shown in the hub's own **RANKS** tab (between DAILY and LOG).
 - One `player_totals` row per claimed player, updated by `submit_run` at the end of every run (not assist mode). Lost runs add kills, elites, bounties and run count; extractions also add salvage banked, best haul, deepest dive and boss best times.
 - 19 boards: banked, haul, extractions, depth, streak (computed from consecutive `daily_scores` days), foreman, mother (fastest first), kills, elite, bounty, and one per hostile type. Top 20 plus your own row.
 - Anti-cheat limits live in `src/core/hallOfFame.ts` (client) and `submit_run` (server).

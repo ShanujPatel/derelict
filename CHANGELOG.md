@@ -3,7 +3,7 @@
 ## [0.9.0] — Unreleased: Hall of fame
 
 ### Added
-- **All-time hall of fame** (DAILY tab): 19 boards in four groups. *Salvage*: total banked, biggest single haul. *Records*: ships cleared, deepest dive, longest daily streak. *Bosses*: fastest Foreman and Bloom Mother kills. *Kills*: all hostiles, elites, bounties, and one board per hostile type (drones, turrets, mimics, crawlers, stalkers, spitters, egg sacs, raiders, brutes). Shows the top 20 plus your own row; each board is cached for a minute.
+- **All-time hall of fame** in its own **RANKS** tab in the hub: 19 boards in four groups. *Salvage*: total banked, biggest single haul. *Records*: ships cleared, deepest dive, longest daily streak. *Bosses*: fastest Foreman and Bloom Mother kills. *Kills*: all hostiles, elites, bounties, and one board per hostile type (drones, turrets, mimics, crawlers, stalkers, spitters, egg sacs, raiders, brutes). Shows the top 20 plus your own row; each board is cached for a minute.
 - Every finished run (extracted or not) adds to your totals once your name is claimed. Kills count either way; salvage, extractions and boss times only count when you get out. Assist mode runs aren't posted. Kills by type, elites and bounties carry down deep-dive lifts.
 - Database: `player_totals` table, `submit_run` (checks run length, depth, salvage rate, kills per kind and per second, elites, bounties, boss times, and 200 runs a day per player) and `get_hall_of_fame`. Rules mirrored in `src/core/hallOfFame.ts`; both are tested (the SQL in PGlite).
 
